@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 [DefaultExecutionOrder(300)]
@@ -23,16 +22,18 @@ public class DemoCameraShake : MonoBehaviour
 
     private void Start()
     {
-        Initialize();
+        if (!Initialize()) enabled = false;
     }
 
     private void OnEnable()
     {
-        if (initialized)
+        if (!Initialize())
         {
-            originalPosition = cameraTransform.localPosition;
-            originalRotation = cameraTransform.localRotation;
+            enabled = false;
+            return;
         }
+        originalPosition = cameraTransform.localPosition;
+        originalRotation = cameraTransform.localRotation;
         focused = Application.isFocused;
     }
 
@@ -40,10 +41,17 @@ public class DemoCameraShake : MonoBehaviour
     {
         if (float.IsNaN(strength) || float.IsInfinity(strength) || strength < 0f)
         {
-            throw new ArgumentOutOfRangeException(nameof(strength), strength, "DemoCameraShake impulse requires a finite nonnegative strength on " + name);
+            Debug.LogError($"Шейк: неверная strength={strength}", this);
+            return;
         }
         if (!isActiveAndEnabled) return;
-        Initialize();
+        if (!Initialize()) return;
+        if (cameraTransform == null || flow == null)
+        {
+            Debug.LogError($"Шейк: потеряны camera={cameraTransform}, flow={flow}", this);
+            enabled = false;
+            return;
+        }
         if (!focused || paused || flow.Finished)
         {
             Clear();
@@ -54,6 +62,13 @@ public class DemoCameraShake : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (!initialized || !isActiveAndEnabled) return;
+        if (cameraTransform == null || flow == null)
+        {
+            Debug.LogError($"Шейк: потеряны camera={cameraTransform}, flow={flow}", this);
+            enabled = false;
+            return;
+        }
         if (!focused || paused || flow.Finished)
         {
             Clear();
@@ -92,24 +107,28 @@ public class DemoCameraShake : MonoBehaviour
         }
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
-        if (initialized) return;
+        if (initialized) return true;
         if (targetCamera == null || flow == null)
         {
-            throw new InvalidOperationException($"DemoCameraShake '{name}' requires targetCamera and flow: targetCamera={targetCamera}, flow={flow}.");
+            Debug.LogError($"Шейк: targetCamera={targetCamera}, flow={flow}", this);
+            return false;
         }
         if (!FiniteNonnegative(maximumOffset) || !FiniteNonnegative(maximumRoll) ||
             !FiniteNonnegative(duration) || duration <= 0f ||
             !FiniteNonnegative(frequency) || frequency <= 0f ||
             !FiniteNonnegative(intensity) || intensity > 1f)
         {
-            throw new InvalidOperationException($"DemoCameraShake '{name}' has invalid parameters: maximumOffset={maximumOffset}, maximumRoll={maximumRoll}, duration={duration}, frequency={frequency}, intensity={intensity}.");
+            Debug.LogError($"Шейк: offset={maximumOffset}, roll={maximumRoll}, duration={duration}, frequency={frequency}, intensity={intensity}", this);
+            return false;
         }
         cameraTransform = targetCamera.transform;
         originalPosition = cameraTransform.localPosition;
         originalRotation = cameraTransform.localRotation;
         initialized = true;
+
+        return true;
     }
 
     private static bool FiniteNonnegative(float value) { return !float.IsNaN(value) && !float.IsInfinity(value) && value >= 0f; }

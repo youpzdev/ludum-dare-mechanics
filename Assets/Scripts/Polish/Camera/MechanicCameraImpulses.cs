@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public class MechanicCameraImpulses : MonoBehaviour
@@ -18,13 +17,17 @@ public class MechanicCameraImpulses : MonoBehaviour
     {
         if (presentation == null || cameraShake == null)
         {
-            throw new InvalidOperationException($"MechanicCameraImpulses '{name}' requires presentation and cameraShake: presentation={presentation}, cameraShake={cameraShake}.");
+            Debug.LogError($"Импульсы: presentation={presentation}, cameraShake={cameraShake}", this);
+            enabled = false;
+            return;
         }
         if (!ValidStrength(bridgeCompleted) || !ValidStrength(bridgeDestroyed) ||
             !ValidStrength(hookAttached) || !ValidStrength(hookStrongPull) ||
             !ValidStrength(batteryDocked) || !ValidStrength(doorOpened))
         {
-            throw new InvalidOperationException($"MechanicCameraImpulses '{name}' strengths must be finite in [0,1]: bridgeCompleted={bridgeCompleted}, bridgeDestroyed={bridgeDestroyed}, hookAttached={hookAttached}, hookStrongPull={hookStrongPull}, batteryDocked={batteryDocked}, doorOpened={doorOpened}.");
+            Debug.LogError($"Импульсы вне [0,1]: bridge={bridgeCompleted}/{bridgeDestroyed}, hook={hookAttached}/{hookStrongPull}, battery={batteryDocked}, door={doorOpened}", this);
+            enabled = false;
+            return;
         }
         subscribedPresentation = presentation;
         subscribedPresentation.Cue += OnCue;
@@ -32,6 +35,13 @@ public class MechanicCameraImpulses : MonoBehaviour
 
     private void OnCue(MechanicCue cue, Vector3 point)
     {
+        if (!isActiveAndEnabled) return;
+        if (cameraShake == null)
+        {
+            Debug.LogError("Импульсы: потерян cameraShake", this);
+            enabled = false;
+            return;
+        }
         switch (cue)
         {
             case MechanicCue.Cancelled:

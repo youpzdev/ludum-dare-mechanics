@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public class MechanicAudioFeedback : MonoBehaviour
@@ -41,7 +40,11 @@ public class MechanicAudioFeedback : MonoBehaviour
 
     private void OnEnable()
     {
-        ValidateReferences();
+        if (!ValidateReferences())
+        {
+            enabled = false;
+            return;
+        }
         focused = Application.isFocused;
         paused = false;
         Clear();
@@ -57,8 +60,8 @@ public class MechanicAudioFeedback : MonoBehaviour
     {
         if (cue == MechanicCue.Cancelled)
         {
-            Clear(CanPlay() && presentation.PreserveDoorFeedback &&
-                doorOpenedClip != null && mechanicSource.clip == doorOpenedClip);
+            Clear(CanPlay() && presentation != null && presentation.PreserveDoorFeedback &&
+                mechanicSource != null && doorOpenedClip != null && mechanicSource.clip == doorOpenedClip);
             return;
         }
         if (!CanPlay()) return;
@@ -92,7 +95,8 @@ public class MechanicAudioFeedback : MonoBehaviour
                 PlayRejection();
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(cue), cue, $"MechanicAudioFeedback '{name}' has no audio mapping for mechanic cue.");
+                Debug.LogError($"Звук: неизвестный cue={cue}", this);
+                return;
         }
     }
 
@@ -106,8 +110,8 @@ public class MechanicAudioFeedback : MonoBehaviour
         if (!CanPlay() || strength < minimumLandingStrength) return;
         double now = Time.unscaledTimeAsDouble;
         if (now < nextLandingTime) return;
-        Play(movementSource, landingClip, movementVolume * Mathf.Lerp(0.4f, 1f,
-            Mathf.Clamp01(strength)), nameof(landingClip));
+        if (!Play(movementSource, landingClip, movementVolume * Mathf.Lerp(0.4f, 1f,
+            Mathf.Clamp01(strength)), nameof(landingClip))) return;
         nextLandingTime = now + landingCooldown;
     }
 
@@ -115,47 +119,60 @@ public class MechanicAudioFeedback : MonoBehaviour
     {
         double now = Time.unscaledTimeAsDouble;
         if (now < nextRejectionTime) return;
-        Play(mechanicSource, rejectedClip, rejectionVolume, nameof(rejectedClip));
+        if (!Play(mechanicSource, rejectedClip, rejectionVolume, nameof(rejectedClip))) return;
         nextRejectionTime = now + rejectionCooldown;
     }
 
     private bool CanPlay() { return isActiveAndEnabled && focused && !paused; }
 
-    private void Play(AudioSource source, AudioClip clip, float volume, string field)
+    private bool Play(AudioSource source, AudioClip clip, float volume, string field)
     {
-        if (clip == null) throw new InvalidOperationException($"MechanicAudioFeedback '{name}' cannot play '{field}' on source '{source.name}': no AudioClip assigned.");
+        if (source == null || clip == null)
+        {
+            Debug.LogError($"Звук: source={source}, {field}={clip}", this);
+            enabled = false;
+            return false;
+        }
         source.Stop();
         source.clip = clip;
         source.volume = volume;
         source.Play();
+
+        return true;
     }
 
-    private void ValidateReferences()
+    private bool ValidateReferences()
     {
         if (presentation == null || movementSource == null || mechanicSource == null ||
             movementSource == mechanicSource)
         {
-            throw new InvalidOperationException($"MechanicAudioFeedback '{name}' requires presentation and two distinct scene AudioSources: presentation={presentation}, movementSource={movementSource}, mechanicSource={mechanicSource}.");
+            Debug.LogError($"Звук: presentation={presentation}, movement={movementSource}, mechanic={mechanicSource}; нужны разные источники", this);
+            return false;
         }
-        ValidateSource(movementSource, nameof(movementSource));
-        ValidateSource(mechanicSource, nameof(mechanicSource));
+        if (!ValidateSource(movementSource, nameof(movementSource)) || !ValidateSource(mechanicSource, nameof(mechanicSource))) return false;
         if (!InRange(movementVolume, 0f, 1f) || !InRange(mechanicVolume, 0f, 1f) ||
             !InRange(rejectionVolume, 0f, 1f) || !InRange(minimumLandingStrength, 0f, 1f) ||
             !InRange(landingCooldown, 0f, float.MaxValue) ||
             !InRange(rejectionCooldown, 0f, float.MaxValue))
         {
-            throw new InvalidOperationException($"MechanicAudioFeedback '{name}' requires finite volumes and landing strength in [0,1], nonnegative cooldowns: movementVolume={movementVolume}, mechanicVolume={mechanicVolume}, rejectionVolume={rejectionVolume}, minimumLandingStrength={minimumLandingStrength}, landingCooldown={landingCooldown}, rejectionCooldown={rejectionCooldown}.");
+            Debug.LogError($"Звук: volume={movementVolume}/{mechanicVolume}/{rejectionVolume}, landing={minimumLandingStrength}, cooldown={landingCooldown}/{rejectionCooldown}", this);
+            return false;
         }
+
+        return true;
     }
 
-    private void ValidateSource(AudioSource source, string field)
+    private bool ValidateSource(AudioSource source, string field)
     {
         if (source.gameObject.scene != gameObject.scene || !source.enabled ||
             !source.gameObject.activeInHierarchy || source.loop || source.playOnAwake ||
             source.spatialBlend != 0f)
         {
-            throw new InvalidOperationException($"MechanicAudioFeedback '{name}' field '{field}' must reference an active, enabled 2D AudioSource in the same scene with loop=false and playOnAwake=false: source='{source.name}', scene='{source.gameObject.scene.path}', ownerScene='{gameObject.scene.path}', enabled={source.enabled}, active={source.gameObject.activeInHierarchy}, loop={source.loop}, playOnAwake={source.playOnAwake}, spatialBlend={source.spatialBlend}.");
+            Debug.LogError($"Звук: {field}={source.name}, scene={source.gameObject.scene.path}, enabled={source.enabled}, active={source.gameObject.activeInHierarchy}, loop={source.loop}, awake={source.playOnAwake}, spatial={source.spatialBlend}", this);
+            return false;
         }
+
+        return true;
     }
 
     private static bool InRange(float value, float minimum, float maximum) { return !float.IsNaN(value) && !float.IsInfinity(value) && value >= minimum && value <= maximum; }
