@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public class MechanicEventEffects : MonoBehaviour
@@ -26,28 +25,35 @@ public class MechanicEventEffects : MonoBehaviour
 
     private void OnEnable()
     {
-        Initialize();
+        if (!Initialize())
+        {
+            enabled = false;
+            return;
+        }
         presentation.Cue += OnCue;
         subscribed = true;
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
-        if (initialized) return;
-        if (presentation == null || successBurst == null || errorBurst == null || eventLight == null || successBurst == errorBurst)
+        if (initialized) return true;
+        if (presentation == null || successBurst == null || errorBurst == null ||
+            eventLight == null || successBurst == errorBurst)
         {
-            throw new InvalidOperationException($"MechanicEventEffects '{name}' needs presentation, distinct successBurst/errorBurst and eventLight references.");
+            Debug.LogError($"Эффекты: presentation={presentation}, success={successBurst}, error={errorBurst}, light={eventLight}", this);
+            return false;
         }
-        if (!float.IsFinite(flashIntensity) || flashIntensity < 0f || !float.IsFinite(flashSeconds) || flashSeconds <= 0f || successCount < 1 || errorCount < 1)
+        if (!float.IsFinite(flashIntensity) || flashIntensity < 0f ||
+            !float.IsFinite(flashSeconds) || flashSeconds <= 0f || successCount < 1 || errorCount < 1)
         {
-            throw new InvalidOperationException($"MechanicEventEffects '{name}' invalid flashIntensity={flashIntensity}, flashSeconds={flashSeconds}, successCount={successCount}, errorCount={errorCount}.");
+            Debug.LogError($"Эффекты: intensity={flashIntensity}, seconds={flashSeconds}, count={successCount}/{errorCount}", this);
+            return false;
         }
-        ValidateParticles(successBurst);
-        ValidateParticles(errorBurst);
-        ValidateVisual(eventLight.transform);
+        if (!ValidateParticles(successBurst) || !ValidateParticles(errorBurst) || !ValidateVisual(eventLight.transform)) return false;
         if (eventLight.transform == successBurst.transform || eventLight.transform == errorBurst.transform)
         {
-            throw new InvalidOperationException($"MechanicEventEffects '{name}' eventLight and bursts must use independent transforms.");
+            Debug.LogError($"Эффекты: eventLight={eventLight.name} использует transform частиц", this);
+            return false;
         }
         originalIntensity = eventLight.intensity;
         originalEnabled = eventLight.enabled;
@@ -56,28 +62,46 @@ public class MechanicEventEffects : MonoBehaviour
         originalErrorPosition = errorBurst.transform.position;
         initialized = true;
         ClearEffects();
+
+        return true;
     }
 
-    private void ValidateParticles(ParticleSystem particles)
+    private bool ValidateParticles(ParticleSystem particles)
     {
-        ValidateVisual(particles.transform);
+        if (!ValidateVisual(particles.transform)) return false;
         ParticleSystem.MainModule main = particles.main;
-        if (main.loop || main.playOnAwake || main.simulationSpace != ParticleSystemSimulationSpace.World || main.stopAction != ParticleSystemStopAction.None || particles.subEmitters.enabled)
+        if (main.loop || main.playOnAwake || main.simulationSpace != ParticleSystemSimulationSpace.World ||
+            main.stopAction != ParticleSystemStopAction.None || particles.subEmitters.enabled)
         {
-            throw new InvalidOperationException($"MechanicEventEffects '{name}' particles '{particles.name}' require loop=false, playOnAwake=false, world simulation and no stop action/subemitters: loop={main.loop}, playOnAwake={main.playOnAwake}, simulationSpace={main.simulationSpace}, stopAction={main.stopAction}, subEmitters={particles.subEmitters.enabled}.");
+            Debug.LogError($"Эффект {particles.name}: loop={main.loop}, awake={main.playOnAwake}, space={main.simulationSpace}, stop={main.stopAction}, subEmitters={particles.subEmitters.enabled}", this);
+            return false;
         }
+
+        return true;
     }
 
-    private void ValidateVisual(Transform target)
+    private bool ValidateVisual(Transform target)
     {
-        if (target == transform || target.childCount != 0 || target.GetComponent<Rigidbody2D>() != null || target.GetComponent<Collider2D>() != null || target.GetComponent<Rigidbody>() != null || target.GetComponent<Collider>() != null)
+        bool hasPhysics = target.GetComponent<Rigidbody2D>() != null || target.GetComponent<Collider2D>() != null ||
+            target.GetComponent<Rigidbody>() != null || target.GetComponent<Collider>() != null;
+        if (target == transform || target.childCount != 0 || hasPhysics)
         {
-            throw new InvalidOperationException($"MechanicEventEffects '{name}' visual '{target.name}' must be a dedicated leaf without physics: children={target.childCount}.");
+            Debug.LogError($"Эффект {target.name}: children={target.childCount}, physics={hasPhysics}; нужен отдельный визуал", this);
+            return false;
         }
+
+        return true;
     }
 
     private void OnCue(MechanicCue cue, Vector3 point)
     {
+        if (!isActiveAndEnabled || !initialized) return;
+        if (presentation == null || successBurst == null || errorBurst == null || eventLight == null)
+        {
+            Debug.LogError($"Эффекты: потеряны presentation={presentation}, success={successBurst}, error={errorBurst}, light={eventLight}", this);
+            enabled = false;
+            return;
+        }
         if (cue == MechanicCue.Cancelled || cue == MechanicCue.HookReleased)
         {
             ClearEffects(cue == MechanicCue.Cancelled && presentation.PreserveDoorFeedback && doorFeedbackActive);
@@ -101,6 +125,12 @@ public class MechanicEventEffects : MonoBehaviour
     private void Update()
     {
         if (flashRemaining <= 0f) return;
+        if (eventLight == null)
+        {
+            Debug.LogError("Эффекты: потерян eventLight", this);
+            enabled = false;
+            return;
+        }
         flashRemaining = Mathf.Max(0f, flashRemaining - Time.unscaledDeltaTime);
         float progress = flashRemaining / flashSeconds;
         eventLight.intensity = originalIntensity + flashIntensity * progress * progress;
@@ -109,6 +139,7 @@ public class MechanicEventEffects : MonoBehaviour
 
     private void RestoreLight()
     {
+        if (eventLight == null) return;
         eventLight.intensity = originalIntensity;
         eventLight.enabled = originalEnabled;
         eventLight.transform.position = originalLightPosition;
@@ -116,7 +147,13 @@ public class MechanicEventEffects : MonoBehaviour
 
     private void ClearEffects(bool preserveDoorFeedback = false)
     {
-        if (!initialized) return;
+        if (!initialized)
+        {
+            if (successBurst != null) successBurst.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
+            if (errorBurst != null) errorBurst.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
+            if (eventLight != null) eventLight.enabled = false;
+            return;
+        }
         if (!preserveDoorFeedback)
         {
             doorFeedbackActive = false;

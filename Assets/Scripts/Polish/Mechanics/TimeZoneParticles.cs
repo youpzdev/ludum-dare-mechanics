@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public class TimeZoneParticles : MonoBehaviour
@@ -14,24 +13,32 @@ public class TimeZoneParticles : MonoBehaviour
 
     private void OnEnable()
     {
-        Initialize();
+        if (!Initialize())
+        {
+            enabled = false;
+            return;
+        }
         Refresh();
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
-        if (initialized) return;
+        if (initialized) return true;
         if (zone == null || particles == null || flow == null)
         {
-            throw new InvalidOperationException($"TimeZoneParticles '{name}' requires zone, particles and flow references.");
+            Debug.LogError($"Частицы зоны: zone={zone}, particles={particles}, flow={flow}", this);
+            return false;
         }
         ParticleSystem.MainModule main = particles.main;
         if (!main.loop || main.playOnAwake || main.stopAction != ParticleSystemStopAction.None || particles.subEmitters.enabled)
         {
-            throw new InvalidOperationException($"TimeZoneParticles '{name}' requires looping authored particles without playOnAwake, stop action or subemitters: loop={main.loop}, playOnAwake={main.playOnAwake}, stopAction={main.stopAction}, subEmitters={particles.subEmitters.enabled}.");
+            Debug.LogError($"Частицы зоны: loop={main.loop}, awake={main.playOnAwake}, stop={main.stopAction}, subEmitters={particles.subEmitters.enabled}", this);
+            return false;
         }
         originalSimulationSpeed = main.simulationSpeed;
         initialized = true;
+
+        return true;
     }
 
     private void Update()
@@ -41,6 +48,13 @@ public class TimeZoneParticles : MonoBehaviour
 
     private void Refresh()
     {
+        if (!initialized || !isActiveAndEnabled) return;
+        if (zone == null || particles == null || flow == null)
+        {
+            Debug.LogError($"Частицы зоны: потеряны zone={zone}, particles={particles}, flow={flow}", this);
+            enabled = false;
+            return;
+        }
         bool active = zone.isActiveAndEnabled && !flow.Finished && focused && !paused;
         if (!active)
         {
@@ -54,9 +68,10 @@ public class TimeZoneParticles : MonoBehaviour
 
     private void StopParticles()
     {
-        if (initialized && particles != null)
+        if (particles != null)
         {
             if (particles.isPlaying || particles.IsAlive(false)) particles.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
+            if (!initialized) return;
             ParticleSystem.MainModule main = particles.main;
             main.simulationSpeed = originalSimulationSpeed;
         }

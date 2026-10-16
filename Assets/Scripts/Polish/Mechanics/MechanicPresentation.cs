@@ -70,18 +70,28 @@ public class MechanicPresentation : MonoBehaviour
 
     private void Start()
     {
-        ValidateReferences();
+        if (!ValidateReferences())
+        {
+            enabled = false;
+            return;
+        }
         CaptureState();
     }
 
     private void OnEnable()
     {
         hasState = false;
+        if (!ValidateReferences()) enabled = false;
     }
 
     private void LateUpdate()
     {
-        if (!focused || paused) return;
+        if (!isActiveAndEnabled || !focused || paused) return;
+        if (!ValidateReferences())
+        {
+            enabled = false;
+            return;
+        }
         if (flow != null && flow.Finished)
         {
             if (!wasFinished)
@@ -101,7 +111,9 @@ public class MechanicPresentation : MonoBehaviour
         Mouse mouse = Mouse.current;
         bool pressed = mouse != null && mouse.leftButton.wasPressedThisFrame && !OverUi(mouse);
         if (bridge != null) ObserveBridge(pressed, mouse);
+        if (!isActiveAndEnabled) return;
         if (grapple != null) ObserveHook(pressed, mouse);
+        if (!isActiveAndEnabled) return;
         if (battery != null) ObserveBattery(mouse);
     }
 
@@ -121,7 +133,8 @@ public class MechanicPresentation : MonoBehaviour
         if (count < previousStrokeCount) Publish(MechanicCue.BridgeDestroyed, bridgePoint);
         if (bridge.isActiveAndEnabled && (previousInk > 0f && ink <= 0f || pressed && ink <= 0f))
         {
-            Vector3 point = pressed ? PointerWorld(mouse, 0f) : bridgePoint;
+            Vector3 point = bridgePoint;
+            if (pressed && !PointerWorld(mouse, 0f, out point)) return;
             Reject(MechanicCue.InkRejected, point, "Чернила закончились", "Нажмите R, чтобы нарисовать мост заново");
         }
         previousStrokeCount = count;
@@ -156,7 +169,8 @@ public class MechanicPresentation : MonoBehaviour
         }
         if (pressed && !attached && grapple.isActiveAndEnabled && grappleBody.simulated)
         {
-            GrappleTarget target = grapple.QueryTarget(PointerWorld(mouse, grappleBody.transform.position.z));
+            if (!PointerWorld(mouse, grappleBody.transform.position.z, out Vector3 pointer)) return;
+            GrappleTarget target = grapple.QueryTarget(pointer);
             if (target.State != GrappleTargetState.Available)
             {
                 Vector3 point = new Vector3(target.Point.x, target.Point.y, grappleBody.transform.position.z);
@@ -177,7 +191,8 @@ public class MechanicPresentation : MonoBehaviour
             if (!complete && battery.Charge <= battery.Settings.ChargeThreshold)
                 Reject(MechanicCue.BatteryRejected, battery.Dock.position, "Недостаточно заряда", "Зарядите аккумулятор слева и перенесите в приемник");
         }
-        else if (wasDragging && !carry.IsDragging && !docked && mouse != null && mouse.leftButton.wasReleasedThisFrame && !OverUi(mouse) && carry.isActiveAndEnabled)
+        else if (wasDragging && !carry.IsDragging && !docked && mouse != null &&
+            mouse.leftButton.wasReleasedThisFrame && !OverUi(mouse) && carry.isActiveAndEnabled)
         {
             float distance = Vector2.Distance(battery.transform.position, battery.Dock.position);
             if (distance <= battery.Settings.DockRadius * 2f && !battery.IsCharging)
@@ -205,16 +220,20 @@ public class MechanicPresentation : MonoBehaviour
         Cue?.Invoke(cue, point);
     }
 
-    private Vector3 PointerWorld(Mouse mouse, float depth)
+    private bool PointerWorld(Mouse mouse, float depth, out Vector3 point)
     {
+        point = default;
         Ray ray = sceneCamera.ScreenPointToRay(mouse.position.ReadValue());
         Plane plane = new Plane(Vector3.forward, new Vector3(0f, 0f, depth));
         if (!plane.Raycast(ray, out float distance))
         {
-            throw new InvalidOperationException($"MechanicPresentation '{name}' camera '{sceneCamera.name}' cannot intersect interaction plane z={depth}, screen={mouse.position.ReadValue()}.");
+            Debug.LogError($"Отклик: camera={sceneCamera.name}, нет пересечения с z={depth}, pointer={mouse.position.ReadValue()}", this);
+            enabled = false;
+            return false;
         }
+        point = ray.GetPoint(distance);
 
-        return ray.GetPoint(distance);
+        return true;
     }
 
     private static bool OverUi(Mouse mouse)
@@ -249,24 +268,35 @@ public class MechanicPresentation : MonoBehaviour
         hasState = true;
     }
 
-    private void ValidateReferences()
+    private bool ValidateReferences()
     {
         if (sceneCamera == null || bridge == null && grapple == null && battery == null)
         {
-            throw new InvalidOperationException($"MechanicPresentation '{name}' requires sceneCamera and at least one mechanic: bridge={bridge}, grapple={grapple}, battery={battery}.");
+            Debug.LogError($"Отклик: camera={sceneCamera}, bridge={bridge}, grapple={grapple}, battery={battery}", this);
+            return false;
         }
         if (bridge != null && (strokesRoot == null || bridgeTip == null || bridgePulse == null))
         {
-            throw new InvalidOperationException($"MechanicPresentation '{name}' bridge '{bridge.name}' requires strokesRoot, bridgeTip and bridgePulse references.");
+            Debug.LogError($"Отклик мостов: root={strokesRoot}, tip={bridgeTip}, pulse={bridgePulse}", this);
+            return false;
         }
         if (grapple != null && (grappleBody == null || !float.IsFinite(strongPullSpeed) || strongPullSpeed <= 0f))
         {
-            throw new InvalidOperationException($"MechanicPresentation '{name}' hook requires grappleBody and finite positive strongPullSpeed={strongPullSpeed}.");
+            Debug.LogError($"Отклик крюка: body={grappleBody}, strongPullSpeed={strongPullSpeed}", this);
+            return false;
         }
         if (battery != null && (carry == null || puzzle == null || doorPoint == null))
         {
-            throw new InvalidOperationException($"MechanicPresentation '{name}' battery '{battery.name}' requires carry, puzzle and doorPoint references.");
+            Debug.LogError($"Отклик батареи: carry={carry}, puzzle={puzzle}, doorPoint={doorPoint}", this);
+            return false;
         }
+        if (battery != null && (battery.Settings == null || battery.Dock == null))
+        {
+            Debug.LogError($"Отклик батареи: settings={battery.Settings}, dock={battery.Dock}", this);
+            return false;
+        }
+
+        return true;
     }
 
     private void Cancel() { CancelFeedback(false); }
