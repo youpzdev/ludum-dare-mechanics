@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
+using UnityEngine;
+using Vector2 = System.Numerics.Vector2;
 
 public class InkPath
 {
     private readonly List<Vector2> points = new List<Vector2>();
     private readonly float inkLength;
     private readonly float pointSpacing;
+    private readonly bool ready;
 
     private double remainingInk; // остаток лучше лишний раз не округлять
     private Vector2 startPoint;
@@ -15,16 +17,17 @@ public class InkPath
 
     public InkPath(float inkLength, float pointSpacing)
     {
-        RequirePositive(inkLength, nameof(inkLength));
-        RequirePositive(pointSpacing, nameof(pointSpacing));
+        if (!RequirePositive(inkLength, nameof(inkLength)) || !RequirePositive(pointSpacing, nameof(pointSpacing))) return;
         if (pointSpacing > inkLength)
         {
-            throw new ArgumentOutOfRangeException(nameof(pointSpacing), pointSpacing, "Point spacing must not exceed ink length " + inkLength);
+            Debug.LogError($"Чернила: pointSpacing={pointSpacing} больше inkLength={inkLength}");
+            return;
         }
 
         this.inkLength = inkLength;
         this.pointSpacing = pointSpacing;
         remainingInk = inkLength;
+        ready = true;
     }
 
     public IReadOnlyList<Vector2> Points => points;
@@ -33,7 +36,7 @@ public class InkPath
 
     public bool Begin(Vector2 point)
     {
-        RequireFinite(point);
+        if (!ready || !RequireFinite(point)) return false;
         End();
         points.Clear();
         if (remainingInk < pointSpacing) return false;
@@ -46,7 +49,7 @@ public class InkPath
 
     public bool Append(Vector2 point)
     {
-        RequireFinite(point);
+        if (!ready || !RequireFinite(point)) return false;
         if (!drawing) return false;
 
         Vector2 previous = points.Count == 0 ? startPoint : points[points.Count - 1];
@@ -78,19 +81,25 @@ public class InkPath
         remainingInk = inkLength;
     }
 
-    private static void RequireFinite(Vector2 point)
+    private static bool RequireFinite(Vector2 point)
     {
         if (float.IsNaN(point.X) || float.IsInfinity(point.X) || float.IsNaN(point.Y) || float.IsInfinity(point.Y))
         {
-            throw new ArgumentOutOfRangeException(nameof(point), point, "Ink point coordinates must be finite");
+            Debug.LogError($"Чернила: некорректная точка point={point}");
+            return false;
         }
+
+        return true;
     }
 
-    private static void RequirePositive(float value, string name)
+    private static bool RequirePositive(float value, string name)
     {
         if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0)
         {
-            throw new ArgumentOutOfRangeException(name, value, "Ink setting must be finite and positive");
+            Debug.LogError($"Чернила: {name}={value}, нужно конечное положительное значение");
+            return false;
         }
+
+        return true;
     }
 }

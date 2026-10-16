@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using UnityEngine;
 
@@ -12,6 +11,7 @@ public class BridgeFeedback : MonoBehaviour
 
     private bool hasAcceptedPoint;
     private bool exhaustionShown;
+    private bool failed;
 
     private Vector2 acceptedPoint;
 
@@ -19,31 +19,36 @@ public class BridgeFeedback : MonoBehaviour
     {
         if (bridgeSettings == null || tipRenderer == null || pulseRenderer == null)
         {
-            throw new ArgumentException("BridgeFeedback requires settings, tip and pulse renderers on " + name);
+            Fail($"Отклик моста {name}: settings={bridgeSettings}, tip={tipRenderer}, pulse={pulseRenderer}");
+            return;
         }
 
         if (tipRenderer == pulseRenderer || tipRenderer.transform == transform || pulseRenderer.transform == transform ||
             !tipRenderer.transform.IsChildOf(transform) || !pulseRenderer.transform.IsChildOf(transform))
         {
-            throw new ArgumentException("BridgeFeedback tip and pulse must be separate child renderers of " + name);
+            Fail($"Отклик моста {name}: tip={tipRenderer.name} и pulse={pulseRenderer.name} должны быть разными дочерними объектами");
+            return;
         }
+
+        if (!bridgeSettings.Validate()) { Fail(null); return; }
 
         ResetFeedback();
         settings = bridgeSettings;
         tip = tipRenderer;
         pulse = pulseRenderer;
+        if (failed) { failed = false; enabled = true; }
         ResetFeedback();
     }
 
     public void BeginStroke()
     {
-        ValidateReferences();
+        if (!ValidateReferences()) return;
         ClearFeedback();
     }
 
     public void AcceptPoint(Vector2 point)
     {
-        ValidateReferences();
+        if (!ValidateReferences()) return;
         acceptedPoint = point;
         hasAcceptedPoint = true;
         tip.transform.position = new Vector3(point.x, point.y, 0);
@@ -54,7 +59,7 @@ public class BridgeFeedback : MonoBehaviour
 
     public void CompleteStroke()
     {
-        ValidateReferences();
+        if (!ValidateReferences()) return;
         tip.enabled = false;
         if (hasAcceptedPoint) PlayPulse(settings.CompletionColor, settings.CompletionDuration);
 
@@ -63,7 +68,7 @@ public class BridgeFeedback : MonoBehaviour
 
     public void ExhaustInk()
     {
-        ValidateReferences();
+        if (!ValidateReferences()) return;
         tip.enabled = false;
         if (hasAcceptedPoint && !exhaustionShown)
         {
@@ -85,7 +90,7 @@ public class BridgeFeedback : MonoBehaviour
         if (tip != null)
         {
             tip.enabled = false;
-            if (settings != null)
+            if (settings != null && !failed)
             {
                 tip.color = settings.TipColor;
                 tip.transform.localScale = Vector3.one * settings.TipSize;
@@ -95,7 +100,7 @@ public class BridgeFeedback : MonoBehaviour
         if (pulse != null)
         {
             pulse.enabled = false;
-            if (settings != null)
+            if (settings != null && !failed)
             {
                 pulse.color = settings.CompletionColor;
                 pulse.transform.localScale = Vector3.one * settings.PulseSize;
@@ -147,11 +152,22 @@ public class BridgeFeedback : MonoBehaviour
         if (!focused) ClearFeedback();
     }
 
-    private void ValidateReferences()
+    private bool ValidateReferences()
     {
+        if (failed) return false;
         if (settings == null || tip == null || pulse == null)
-        {
-            throw new InvalidOperationException("BridgeFeedback settings, tip or pulse is unassigned on " + name);
-        }
+            return Fail($"Отклик моста {name}: settings={settings}, tip={tip}, pulse={pulse}");
+        if (!settings.Validate()) return Fail(null);
+
+        return true;
+    }
+
+    private bool Fail(string error)
+    {
+        if (!failed && error != null) Debug.LogError(error, this);
+        failed = true;
+        enabled = false;
+
+        return false;
     }
 }

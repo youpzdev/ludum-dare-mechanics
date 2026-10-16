@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -14,35 +13,41 @@ public class BridgeStroke : MonoBehaviour
     private readonly List<Vector2> colliderPoints = new List<Vector2>();
     private readonly AnimationCurve widthCurve = AnimationCurve.Constant(0, 1, 1);
 
+    private bool failed;
+
     public void Configure(LineRenderer lineRenderer, EdgeCollider2D edgeCollider)
     {
         if (lineRenderer == null || edgeCollider == null)
         {
-            throw new ArgumentException("BridgeStroke requires LineRenderer and EdgeCollider2D references on " + name);
+            Fail($"Линия моста {name}: lineRenderer={lineRenderer}, edgeCollider={edgeCollider}");
+            return;
         }
 
         if (lineRenderer.gameObject != gameObject || edgeCollider.gameObject != gameObject)
         {
-            throw new ArgumentException("BridgeStroke renderer and collider must belong to " + name);
+            Fail($"Линия моста {name}: lineRenderer={lineRenderer.name} и edgeCollider={edgeCollider.name} должны быть на том же объекте");
+            return;
         }
 
         line = lineRenderer;
         edge = edgeCollider;
+        if (failed) { failed = false; enabled = true; }
     }
 
-    public void SetPoints(IReadOnlyList<System.Numerics.Vector2> points, float thickness)
+    public bool SetPoints(IReadOnlyList<System.Numerics.Vector2> points, float thickness)
     {
-        if (line == null || edge == null) throw new InvalidOperationException("BridgeStroke references are unassigned on " + name);
+        if (failed) return false;
+        if (line == null || edge == null) return Fail($"Линия моста {name}: line={line}, edge={edge}");
 
         if (points == null || points.Count < 2)
-        {
-            throw new ArgumentException("BridgeStroke requires at least 2 points, received " + (points == null ? 0 : points.Count), nameof(points));
-        }
+            return Fail($"Линия моста {name}: points.Count={points?.Count ?? 0}, нужно хотя бы 2 точки");
 
         if (float.IsNaN(thickness) || float.IsInfinity(thickness) || thickness <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(thickness), thickness, "Bridge thickness must be finite and positive");
-        }
+            return Fail($"Линия моста {name}: thickness={thickness}, нужна конечная положительная толщина");
+
+        for (int i = 0; i < points.Count; i++)
+            if (float.IsNaN(points[i].X) || float.IsInfinity(points[i].X) || float.IsNaN(points[i].Y) || float.IsInfinity(points[i].Y))
+                return Fail($"Линия моста {name}: points[{i}]={points[i]}");
 
         line.useWorldSpace = false;
         line.widthMultiplier = thickness;
@@ -59,10 +64,20 @@ public class BridgeStroke : MonoBehaviour
         edge.offset = Vector2.zero;
         edge.edgeRadius = thickness * 0.5f;
         if (!edge.SetPoints(colliderPoints))
-        {
-            throw new InvalidOperationException("BridgeStroke failed to set collider points on " + name + "; count=" + colliderPoints.Count);
-        }
+            return Fail($"Линия моста {name}: коллайдер отклонил points.Count={colliderPoints.Count}");
         edge.isTrigger = false;
         edge.enabled = true;
+
+        return true;
+    }
+
+    private bool Fail(string error)
+    {
+        if (!failed) Debug.LogError(error, this);
+        failed = true;
+        enabled = false;
+        if (edge != null && edge.gameObject == gameObject) edge.enabled = false;
+
+        return false;
     }
 }

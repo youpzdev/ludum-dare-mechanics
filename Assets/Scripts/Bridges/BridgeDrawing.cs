@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -21,28 +20,49 @@ public class BridgeDrawing : MonoBehaviour
 
     private InkPath path;
     private BridgeStroke activeStroke;
+    private bool failed;
 
-    public float RemainingInk => path == null ? GetSettings().InkLength : path.RemainingInk;
+    public float RemainingInk
+    {
+        get
+        {
+            if (path != null) return path.RemainingInk;
+            if (failed) return 0f;
+            if (settings != null)
+            {
+                if (settings.Validate()) return settings.InkLength;
+                Fail(null);
+                return 0f;
+            }
+            Fail($"Рисование моста {name}: settings не назначены");
+
+            return 0f;
+        }
+    }
+
     public int StrokeCount => strokes.Count;
 
     public void Configure(Camera camera, BridgeSettings bridgeSettings, BridgeStroke prefab, Transform root)
     {
         if (camera == null || bridgeSettings == null || prefab == null || root == null)
         {
-            throw new ArgumentException("BridgeDrawing requires camera, settings, stroke prefab and strokes root on " + name);
+            Fail($"Рисование моста {name}: camera={camera}, settings={bridgeSettings}, prefab={prefab}, root={root}");
+            return;
         }
+        if (!bridgeSettings.Validate()) { Fail(null); return; }
 
         ResetDrawing();
         drawingCamera = camera;
         settings = bridgeSettings;
         strokePrefab = prefab;
         strokesRoot = root;
+        if (failed) { failed = false; enabled = true; }
         path = CreatePath();
     }
 
     public void ConfigureFeedback(BridgeFeedback bridgeFeedback)
     {
-        if (bridgeFeedback == null) throw new ArgumentNullException(nameof(bridgeFeedback), "BridgeDrawing feedback is unassigned on " + name);
+        if (bridgeFeedback == null) { Fail($"Рисование моста {name}: bridgeFeedback не назначен"); return; }
 
         CancelStroke();
         feedback = bridgeFeedback;
@@ -51,7 +71,7 @@ public class BridgeDrawing : MonoBehaviour
 
     public bool BeginStroke(Vector2 point)
     {
-        ValidateReferences();
+        if (!ValidateReferences()) return false;
         EndStroke();
         if (path == null) path = CreatePath();
 
@@ -63,6 +83,7 @@ public class BridgeDrawing : MonoBehaviour
 
     public bool AppendPoint(Vector2 point)
     {
+        if (!ValidateReferences()) return false;
         if (path == null || !path.Append(new System.Numerics.Vector2(point.x, point.y))) return false;
 
         if (activeStroke == null)
@@ -71,7 +92,7 @@ public class BridgeDrawing : MonoBehaviour
             strokes.Add(activeStroke);
         }
 
-        activeStroke.SetPoints(path.Points, settings.Thickness);
+        if (!activeStroke.SetPoints(path.Points, settings.Thickness)) { Fail(null); return false; }
         if (feedback != null && feedback.isActiveAndEnabled)
         {
             System.Numerics.Vector2 accepted = path.Points[path.Points.Count - 1];
@@ -112,6 +133,7 @@ public class BridgeDrawing : MonoBehaviour
 
     private void Update()
     {
+        if (!ValidateReferences()) return;
         Mouse mouse = Mouse.current;
         if (mouse == null)
         {
@@ -126,13 +148,17 @@ public class BridgeDrawing : MonoBehaviour
             return;
         }
 
-        if (mouse.leftButton.wasPressedThisFrame) BeginStroke(ScreenToWorld(mouse.position.ReadValue()));
+        Vector2 point = default;
+        if ((mouse.leftButton.wasPressedThisFrame || mouse.leftButton.isPressed ||
+            mouse.leftButton.wasReleasedThisFrame) && !TryScreenToWorld(mouse.position.ReadValue(), out point)) return;
 
-        if (mouse.leftButton.isPressed) AppendPoint(ScreenToWorld(mouse.position.ReadValue()));
+        if (mouse.leftButton.wasPressedThisFrame) BeginStroke(point);
+
+        if (mouse.leftButton.isPressed) AppendPoint(point);
 
         if (mouse.leftButton.wasReleasedThisFrame)
         {
-            if (path != null && path.IsDrawing) AppendPoint(ScreenToWorld(mouse.position.ReadValue()));
+            if (path != null && path.IsDrawing) AppendPoint(point);
 
             EndStroke();
         }
@@ -158,36 +184,40 @@ public class BridgeDrawing : MonoBehaviour
 
     private InkPath CreatePath() { return new InkPath(settings.InkLength, settings.PointSpacing); }
 
-    private Vector2 ScreenToWorld(Vector2 screenPoint)
+    private bool TryScreenToWorld(Vector2 screenPoint, out Vector2 point)
     {
-        ValidateReferences();
+        point = default;
+        if (!ValidateReferences()) return false;
         Ray ray = drawingCamera.ScreenPointToRay(screenPoint);
         if (Mathf.Abs(ray.direction.z) < 0.000001f)
-        {
-            throw new InvalidOperationException("BridgeDrawing camera ray cannot intersect z=0 on " + name);
-        }
+            return Fail($"Рисование моста {name}: луч camera={drawingCamera.name} параллелен плоскости z=0");
 
         float distance = -ray.origin.z / ray.direction.z;
-        if (distance < 0) throw new InvalidOperationException("BridgeDrawing z=0 plane is behind camera " + drawingCamera.name);
+        if (distance < 0) return Fail($"Рисование моста {name}: плоскость z=0 позади camera={drawingCamera.name}, distance={distance}");
 
-        Vector3 point = ray.GetPoint(distance);
+        Vector3 intersection = ray.GetPoint(distance);
+        point = new Vector2(intersection.x, intersection.y);
 
-        return new Vector2(point.x, point.y);
+        return true;
     }
 
-    private BridgeSettings GetSettings()
+    private bool ValidateReferences()
     {
-        if (settings == null) throw new InvalidOperationException("BridgeDrawing settings are unassigned on " + name);
+        if (failed) return false;
+        if (settings == null || drawingCamera == null || strokePrefab == null || strokesRoot == null)
+            return Fail($"Рисование моста {name}: settings={settings}, camera={drawingCamera}, strokePrefab={strokePrefab}, strokesRoot={strokesRoot}");
+        if (!settings.Validate()) return Fail(null);
 
-        return settings;
+        return true;
     }
 
-    private void ValidateReferences()
+    private bool Fail(string error)
     {
-        GetSettings();
-        if (drawingCamera == null || strokePrefab == null || strokesRoot == null)
-        {
-            throw new InvalidOperationException("BridgeDrawing camera, stroke prefab or strokes root is unassigned on " + name);
-        }
+        if (!failed && error != null) Debug.LogError(error, this);
+        failed = true;
+        enabled = false;
+        CancelStroke();
+
+        return false;
     }
 }

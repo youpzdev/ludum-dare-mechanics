@@ -37,4 +37,28 @@ public class BridgeSettings : ScriptableObject
     public float PointSpacing => pointSpacing;
     public float Thickness => thickness;
     public float BallSpeed => ballSpeed;
+
+    public bool Validate()
+    {
+        if (!Positive(inkLength, nameof(inkLength)) || !Positive(pointSpacing, nameof(pointSpacing)) ||
+            !Positive(thickness, nameof(thickness)) || !Positive(ballSpeed, nameof(ballSpeed)) ||
+            !Positive(tipSize, nameof(tipSize)) || !Positive(pulseSize, nameof(pulseSize)) ||
+            !Positive(completionDuration, nameof(completionDuration)) || !Positive(exhaustionDuration, nameof(exhaustionDuration))) return false;
+        if (pointSpacing > inkLength)
+        {
+            Debug.LogError($"Настройки моста {name}: pointSpacing={pointSpacing} больше inkLength={inkLength}", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool Positive(float value, string field)
+    {
+        if (!float.IsNaN(value) && !float.IsInfinity(value) && value > 0) return true;
+
+        Debug.LogError($"Настройки моста {name}: {field}={value}, нужно конечное положительное значение", this);
+
+        return false;
+    }
 }
