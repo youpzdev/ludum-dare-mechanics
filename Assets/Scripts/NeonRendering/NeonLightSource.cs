@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -8,36 +7,47 @@ public class NeonLightSource : MonoBehaviour
     [SerializeField] private Light localLight;
     [SerializeField] private NeonRenderSettings settings;
 
+    private bool failed;
+
     public void Configure(SpriteRenderer renderer, Light light, NeonRenderSettings renderSettings)
     {
         if (renderer == null || light == null || renderSettings == null)
         {
-            throw new ArgumentException($"Neon light configuration renderer={renderer} light={light} settings={renderSettings} object={name}");
+            Debug.LogError($"Не настроен свет '{name}': source={renderer}, light={light}, settings={renderSettings}", this);
+            return;
         }
         source = renderer;
         localLight = light;
         settings = renderSettings;
+        if (failed)
+        {
+            failed = false;
+            enabled = true;
+        }
         Refresh();
     }
 
     private void OnEnable()
     {
-        if (source == null || localLight == null || settings == null)
-        {
-            throw new InvalidOperationException($"Neon light references missing object={name} renderer={source} light={localLight} settings={settings}");
-        }
-        Refresh();
+        if (ValidateReferences()) Refresh();
     }
 
     private void LateUpdate()
     {
-        if (source == null)
-        {
-            localLight.enabled = false;
-            enabled = false;
-            return;
-        }
+        if (!ValidateReferences()) return;
         Refresh();
+    }
+
+    private bool ValidateReferences()
+    {
+        if (source != null && localLight != null && settings != null) return true;
+
+        if (!failed)
+            Debug.LogError($"Не обновлен свет '{name}': source={source}, light={localLight}, settings={settings}", this);
+        failed = true;
+        enabled = false;
+
+        return false;
     }
 
     private void Refresh()
