@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 public static class GrappleMath
 {
@@ -16,19 +17,20 @@ public static class GrappleMath
         float acceleration, float maxSpeed, float arrivalDistance, float deltaTime,
         out float resultX, out float resultY)
     {
+        resultX = velocityX;
+        resultY = velocityY;
         if (!IsFinite(velocityX) || !IsFinite(velocityY) || !IsFinite(offsetX) || !IsFinite(offsetY))
         {
-            throw new ArgumentException($"Grapple velocity ({velocityX}, {velocityY}) and offset ({offsetX}, {offsetY}) must be finite.");
+            Debug.LogError($"Крюк: неверные скорость ({velocityX}, {velocityY}) или смещение ({offsetX}, {offsetY})");
+            return;
         }
         if (!IsFinite(acceleration) || acceleration < 0f || !IsFinite(maxSpeed) || maxSpeed <= 0f ||
             !IsFinite(arrivalDistance) || arrivalDistance < 0f || !IsFinite(deltaTime) || deltaTime < 0f)
         {
-            throw new ArgumentOutOfRangeException(nameof(acceleration),
-                $"Grapple acceleration={acceleration}, maxSpeed={maxSpeed}, arrivalDistance={arrivalDistance}, deltaTime={deltaTime} are not valid.");
+            Debug.LogError($"Крюк: acceleration={acceleration}, maxSpeed={maxSpeed}, arrivalDistance={arrivalDistance}, deltaTime={deltaTime}");
+            return;
         }
 
-        resultX = velocityX;
-        resultY = velocityY;
         double distance = Math.Sqrt((double)offsetX * offsetX + (double)offsetY * offsetY);
         if (distance <= arrivalDistance || deltaTime == 0f) return;
 

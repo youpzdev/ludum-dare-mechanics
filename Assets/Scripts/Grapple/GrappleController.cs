@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -46,6 +45,7 @@ public class GrappleController : MonoBehaviour
     private Collider2D anchor;
     private Vector3 localPoint;
 
+    private bool invalid;
     private bool focused = true;
     private bool paused;
 
@@ -59,7 +59,7 @@ public class GrappleController : MonoBehaviour
         }
     }
 
-    public Vector2 AttachmentPoint => IsAttached ? (Vector2)anchor.transform.TransformPoint(localPoint) : body.position;
+    public Vector2 AttachmentPoint => IsAttached ? (Vector2)anchor.transform.TransformPoint(localPoint) : body == null ? (Vector2)transform.position : body.position;
     public float CurrentDistance => IsAttached ? Vector2.Distance(body.position, anchor.transform.TransformPoint(localPoint)) : 0f;
 
     public void ConfigureFeedback(GrappleFeedback value)
@@ -70,28 +70,43 @@ public class GrappleController : MonoBehaviour
 
     private void Awake()
     {
-        if (body == null || aimCamera == null || settings == null || rope == null)
-        {
-            throw new InvalidOperationException($"GrappleController '{name}' requires body, camera, settings and rope references.");
-        }
-
-        if (!settings.IsValid)
-        {
-            throw new InvalidOperationException($"GrappleController '{name}' has invalid settings '{settings.name}': range={settings.Range}, acceleration={settings.Acceleration}, maxSpeed={settings.MaxSpeed}, arrival={settings.ArrivalDistance}, tether={settings.MaxTetherLength}.");
-        }
-
-        if (grappleSurfaceMask.value == 0 || (queryMask.value & grappleSurfaceMask.value) != grappleSurfaceMask.value)
-        {
-            throw new InvalidOperationException($"GrappleController '{name}' queryMask={queryMask.value} must contain grappleSurfaceMask={grappleSurfaceMask.value}, which must not be empty.");
-        }
+        if (!Validate()) return;
 
         rope.useWorldSpace = true;
         rope.positionCount = 2;
         Release();
     }
 
+    private bool Validate()
+    {
+        if (invalid) return false;
+
+        if (body == null || aimCamera == null || settings == null || rope == null)
+            return StopInvalid($"Крюк {name}: body={body}, camera={aimCamera}, settings={settings}, rope={rope}");
+
+        if (!settings.IsValid)
+            return StopInvalid($"Крюк {name}: range={settings.Range}, acceleration={settings.Acceleration}, maxSpeed={settings.MaxSpeed}, arrival={settings.ArrivalDistance}, tether={settings.MaxTetherLength}");
+
+        if (grappleSurfaceMask.value == 0 || (queryMask.value & grappleSurfaceMask.value) != grappleSurfaceMask.value)
+            return StopInvalid($"Крюк {name}: queryMask={queryMask.value}, surfaceMask={grappleSurfaceMask.value}");
+
+        return true;
+    }
+
+    private bool StopInvalid(string message)
+    {
+        if (!invalid) Debug.LogError(message, this);
+        invalid = true;
+        Release();
+        enabled = false;
+
+        return false;
+    }
+
     private void Update()
     {
+        if (!Validate()) return;
+
         Mouse mouse = Mouse.current;
         if (mouse == null || !body.simulated || !focused || paused)
         {
@@ -128,10 +143,11 @@ public class GrappleController : MonoBehaviour
 
     public GrappleTarget QueryTarget(Vector2 target)
     {
-        if (!isActiveAndEnabled || !body.simulated || !GrappleMath.IsFinite(target.x) || !GrappleMath.IsFinite(target.y))
-        {
+        if (!isActiveAndEnabled || !Validate())
+            return new GrappleTarget(GrappleTargetState.None, body == null ? (Vector2)transform.position : body.position, default);
+
+        if (!body.simulated || !GrappleMath.IsFinite(target.x) || !GrappleMath.IsFinite(target.y))
             return new GrappleTarget(GrappleTargetState.None, body.position, default);
-        }
 
         Vector2 offset = target - body.position;
         if (offset.sqrMagnitude <= Mathf.Epsilon) return new GrappleTarget(GrappleTargetState.None, body.position, default);
@@ -156,7 +172,7 @@ public class GrappleController : MonoBehaviour
     public bool TryAttach(Vector2 target)
     {
         Release();
-        if (!focused || paused) return false;
+        if (!isActiveAndEnabled || !Validate() || !focused || paused) return false;
 
         return Attach(QueryTarget(target));
     }
@@ -205,10 +221,17 @@ public class GrappleController : MonoBehaviour
 
     private void FixedUpdate()
     {
-        if (!IsAttached) return;
+        if (!Validate() || !IsAttached) return;
 
         Vector2 offset = (Vector2)anchor.transform.TransformPoint(localPoint) - body.position;
         Vector2 velocity = body.linearVelocity;
+        if (!GrappleMath.IsFinite(velocity.x) || !GrappleMath.IsFinite(velocity.y) ||
+            !GrappleMath.IsFinite(offset.x) || !GrappleMath.IsFinite(offset.y))
+        {
+            StopInvalid($"Крюк {name}: velocity={velocity}, offset={offset}");
+            return;
+        }
+
         GrappleMath.PullVelocity(velocity.x, velocity.y, offset.x, offset.y,
             settings.Acceleration, settings.MaxSpeed, settings.ArrivalDistance, Time.fixedDeltaTime,
             out float nextX, out float nextY);
@@ -217,6 +240,8 @@ public class GrappleController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (!Validate()) return;
+
         if (!body.simulated || !focused || paused)
         {
             Release();
@@ -233,6 +258,7 @@ public class GrappleController : MonoBehaviour
     private void SyncRope()
     {
         bool attached = IsAttached;
+        if (rope == null) return;
         rope.enabled = attached;
         if (!attached) return;
 
@@ -249,7 +275,7 @@ public class GrappleController : MonoBehaviour
             return;
         }
 
-        if (!anchor.enabled || !anchor.gameObject.activeInHierarchy || !body.simulated ||
+        if (body == null || settings == null || !anchor.enabled || !anchor.gameObject.activeInHierarchy || !body.simulated ||
             (anchor.attachedRigidbody != null && !anchor.attachedRigidbody.simulated) ||
             !GrappleMath.IsWithinTether(Vector2.Distance(body.position, anchor.transform.TransformPoint(localPoint)), settings.MaxTetherLength))
         {

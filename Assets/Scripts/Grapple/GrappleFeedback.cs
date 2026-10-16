@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using UnityEngine;
 
@@ -16,6 +15,8 @@ public class GrappleFeedback : MonoBehaviour
     private Tween ropeTween;
 
     private bool initialized;
+    private bool invalid;
+    private bool disabledByFailure;
 
     private Color ropeStartColor;
     private Color ropeEndColor;
@@ -28,7 +29,9 @@ public class GrappleFeedback : MonoBehaviour
         contactCue = contact;
         rope = line;
         initialized = false;
-        Initialize();
+        invalid = false;
+        if (!Initialize()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
     public void ConfigureContactExtras(SpriteRenderer glow, ParticleSystem burst)
@@ -36,40 +39,42 @@ public class GrappleFeedback : MonoBehaviour
         Clear();
         contactGlow = glow;
         contactBurst = burst;
-        ValidateExtras();
-        Clear();
+        initialized = false;
+        invalid = false;
+        if (!Initialize()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
-    private void ValidateExtras()
+    private bool ValidateExtras()
     {
         if (contactGlow != null)
         {
             if (contactGlow.sprite == null)
-            {
-                throw new InvalidOperationException($"GrappleFeedback '{name}' glow '{contactGlow.name}' requires an authored sprite.");
-            }
-            ValidateExtraTransform(contactGlow.transform);
+                return StopInvalid($"Крюк {name}: у glow {contactGlow.name} нет sprite");
+            if (!ValidateExtraTransform(contactGlow.transform)) return false;
         }
         if (contactBurst != null)
         {
-            ValidateExtraTransform(contactBurst.transform);
+            if (!ValidateExtraTransform(contactBurst.transform)) return false;
             ParticleSystem.MainModule main = contactBurst.main;
             if (main.loop || main.playOnAwake || main.simulationSpace != ParticleSystemSimulationSpace.World ||
                 main.stopAction != ParticleSystemStopAction.None ||
                 contactBurst.transform.childCount != 0 || contactBurst.subEmitters.enabled)
             {
-                throw new InvalidOperationException($"GrappleFeedback '{name}' burst '{contactBurst.name}' must be a single authored nonlooping world-space system: loop={main.loop}, playOnAwake={main.playOnAwake}, simulationSpace={main.simulationSpace}, stopAction={main.stopAction}, children={contactBurst.transform.childCount}, subEmitters={contactBurst.subEmitters.enabled}.");
+                return StopInvalid($"Крюк {name}: burst {contactBurst.name}, loop={main.loop}, playOnAwake={main.playOnAwake}, space={main.simulationSpace}, stop={main.stopAction}, children={contactBurst.transform.childCount}, subEmitters={contactBurst.subEmitters.enabled}");
             }
         }
         if (contactGlow != null && contactBurst != null &&
             (contactGlow.transform == contactBurst.transform || contactGlow.transform.IsChildOf(contactBurst.transform) ||
             contactBurst.transform.IsChildOf(contactGlow.transform)))
         {
-            throw new InvalidOperationException($"GrappleFeedback '{name}' glow '{contactGlow.name}' and burst '{contactBurst.name}' require independent transforms.");
+            return StopInvalid($"Крюк {name}: glow и burst должны быть отдельными объектами");
         }
+
+        return true;
     }
 
-    private void ValidateExtraTransform(Transform visual)
+    private bool ValidateExtraTransform(Transform visual)
     {
         if (visual.GetComponent<Rigidbody2D>() != null || visual.GetComponent<Collider2D>() != null ||
             visual.GetComponent<Rigidbody>() != null || visual.GetComponent<Collider>() != null ||
@@ -78,45 +83,61 @@ public class GrappleFeedback : MonoBehaviour
             (contactCue != null && (visual == contactCue.transform || contactCue.transform.IsChildOf(visual) || visual.IsChildOf(contactCue.transform))) ||
             (rope != null && (visual == rope.transform || rope.transform.IsChildOf(visual))))
         {
-            throw new InvalidOperationException($"GrappleFeedback '{name}' extra '{visual.name}' must be an independent visual leaf without physics components: children={visual.childCount}.");
+            return StopInvalid($"Крюк {name}: эффект {visual.name} вложен в другой эффект или содержит физику, children={visual.childCount}");
         }
+
+        return true;
     }
 
     private void Start()
     {
-        Initialize();
+        if (!Initialize()) return;
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
-        if (initialized) return;
+        if (invalid) return false;
 
         if (settings == null || aimMarker == null || contactCue == null || rope == null ||
             aimMarker == contactCue || aimMarker.sprite == null || contactCue.sprite == null)
         {
-            throw new InvalidOperationException($"GrappleFeedback '{name}' requires settings, two distinct authored SpriteRenderers with sprites and rope: settings={settings}, marker={aimMarker}, contact={contactCue}, rope={rope}.");
+            return StopInvalid($"Крюк {name}: settings={settings}, marker={aimMarker}, contact={contactCue}, rope={rope}, нужны разные маркеры со sprite");
         }
 
         if (aimMarker.GetComponent<Rigidbody2D>() != null || contactCue.GetComponent<Rigidbody2D>() != null)
-        {
-            throw new InvalidOperationException($"GrappleFeedback '{name}' cannot move or scale a physics root: marker='{aimMarker.name}', contact='{contactCue.name}'.");
-        }
+            return StopInvalid($"Крюк {name}: физика на marker={aimMarker.name} или contact={contactCue.name}");
 
         if (!settings.IsFeedbackValid)
-        {
-            throw new InvalidOperationException($"GrappleFeedback '{name}' has invalid settings '{settings.name}': availableSize={settings.AvailableMarkerSize}, blockedSize={settings.BlockedMarkerSize}, noTargetSize={settings.NoTargetMarkerSize}, contactSize={settings.ContactSize}, contactEndSize={settings.ContactEndSize}, contactDuration={settings.ContactDuration}, ropeAccentDuration={settings.RopeAccentDuration}, glowSize={settings.ContactGlowSize}, glowEndSize={settings.ContactGlowEndSize}, glowOpacity={settings.ContactGlowOpacity}.");
-        }
+            return StopInvalid($"Крюк {name}: {settings.name}, marker={settings.AvailableMarkerSize}/{settings.BlockedMarkerSize}/{settings.NoTargetMarkerSize}, contact={settings.ContactSize}/{settings.ContactEndSize}/{settings.ContactDuration}, rope={settings.RopeAccentDuration}, glow={settings.ContactGlowSize}/{settings.ContactGlowEndSize}/{settings.ContactGlowOpacity}");
 
-        ValidateExtras();
+        if (!ValidateExtras() || !ValidateSize(aimMarker, out _) || !ValidateSize(contactCue, out _) ||
+            (contactGlow != null && !ValidateSize(contactGlow, out _))) return false;
+
+        if (initialized) return true;
+
         ropeStartColor = rope.startColor;
         ropeEndColor = rope.endColor;
         initialized = true;
         Clear();
+
+        return true;
+    }
+
+    private bool StopInvalid(string message)
+    {
+        if (!invalid) Debug.LogError(message, this);
+        disabledByFailure |= enabled;
+        invalid = true;
+        initialized = false;
+        Clear();
+        enabled = false;
+
+        return false;
     }
 
     public void ShowTarget(GrappleTarget target, float depth)
     {
-        Initialize();
+        if (!Initialize()) return;
         if (!isActiveAndEnabled)
         {
             Clear();
@@ -129,19 +150,19 @@ public class GrappleFeedback : MonoBehaviour
             target.State == GrappleTargetState.Blocked ? settings.BlockedMarkerSize : settings.NoTargetMarkerSize;
         aimMarker.transform.position = new Vector3(target.Point.x, target.Point.y, depth);
         aimMarker.color = color;
-        SetSize(aimMarker, size);
+        if (!SetSize(aimMarker, size)) return;
         aimMarker.enabled = true;
     }
 
     public void ShowAttachment(Vector3 point)
     {
-        Initialize();
+        if (!Initialize()) return;
         Clear();
-        if (!isActiveAndEnabled) return;
+        if (!isActiveAndEnabled || invalid) return;
 
         contactCue.transform.position = point;
         contactCue.color = settings.ContactColor;
-        SetSize(contactCue, settings.ContactSize);
+        if (!SetSize(contactCue, settings.ContactSize)) return;
         contactCue.enabled = true;
         contactTween = DOTween.Sequence().SetUpdate(true);
         contactTween.Join(DOTween.To(() => settings.ContactSize, value => SetSize(contactCue, value),
@@ -158,7 +179,7 @@ public class GrappleFeedback : MonoBehaviour
             Color glowColor = settings.ContactColor;
             glowColor.a *= settings.ContactGlowOpacity;
             contactGlow.color = glowColor;
-            SetSize(contactGlow, settings.ContactGlowSize);
+            if (!SetSize(contactGlow, settings.ContactGlowSize)) return;
             contactGlow.enabled = true;
             glowTween = DOTween.Sequence().SetUpdate(true);
             glowTween.Join(DOTween.To(() => settings.ContactGlowSize, value => SetSize(contactGlow, value),
@@ -190,6 +211,8 @@ public class GrappleFeedback : MonoBehaviour
 
     public void FollowAttachment(Vector3 point)
     {
+        if (invalid) return;
+
         if (contactCue != null && contactCue.enabled) contactCue.transform.position = point;
         if (contactGlow != null && contactGlow.enabled) contactGlow.transform.position = point;
         if (contactBurst != null && contactBurst.isPlaying) contactBurst.transform.position = point;
@@ -206,12 +229,12 @@ public class GrappleFeedback : MonoBehaviour
         if (contactGlow != null)
         {
             contactGlow.enabled = false;
-            if (initialized)
+            if (initialized && settings != null)
             {
                 Color glowColor = settings.ContactColor;
                 glowColor.a *= settings.ContactGlowOpacity;
                 contactGlow.color = glowColor;
-                SetSize(contactGlow, settings.ContactGlowSize);
+                if (!SetSize(contactGlow, settings.ContactGlowSize)) return;
             }
         }
         if (contactBurst != null) contactBurst.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -219,10 +242,10 @@ public class GrappleFeedback : MonoBehaviour
         if (contactCue != null)
         {
             contactCue.enabled = false;
-            if (initialized)
+            if (initialized && settings != null)
             {
                 contactCue.color = settings.ContactColor;
-                SetSize(contactCue, settings.ContactSize);
+                if (!SetSize(contactCue, settings.ContactSize)) return;
             }
         }
         if (initialized && rope != null)
@@ -232,8 +255,12 @@ public class GrappleFeedback : MonoBehaviour
         }
     }
 
-    private static void SetSize(SpriteRenderer renderer, float size)
+    private bool ValidateSize(SpriteRenderer renderer, out float scale)
     {
+        scale = 0f;
+        if (renderer == null || renderer.sprite == null)
+            return StopInvalid($"Крюк {name}: у renderer={renderer} нет sprite");
+
         Vector3 bounds = renderer.sprite.bounds.size;
         float spriteSize = Mathf.Max(bounds.x, bounds.y);
         float parentScale = renderer.transform.parent == null ? 1f :
@@ -241,10 +268,22 @@ public class GrappleFeedback : MonoBehaviour
         if (!GrappleMath.IsFinite(spriteSize) || !GrappleMath.IsFinite(parentScale) ||
             spriteSize <= Mathf.Epsilon || parentScale <= Mathf.Epsilon)
         {
-            throw new InvalidOperationException($"GrappleFeedback renderer '{renderer.name}' requires nonzero sprite bounds and parent scale: spriteSize={spriteSize}, parentScale={parentScale}.");
+            return StopInvalid($"Крюк {name}: renderer={renderer.name}, spriteSize={spriteSize}, parentScale={parentScale}");
         }
-        float scale = size / (spriteSize * parentScale);
+
+        scale = spriteSize * parentScale;
+
+        return true;
+    }
+
+    private bool SetSize(SpriteRenderer renderer, float size)
+    {
+        if (!ValidateSize(renderer, out float spriteScale)) return false;
+
+        float scale = size / spriteScale;
         renderer.transform.localScale = new Vector3(scale, scale, 1f);
+
+        return true;
     }
 
     private void OnDisable()
