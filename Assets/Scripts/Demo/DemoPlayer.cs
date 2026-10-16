@@ -86,10 +86,12 @@ public class DemoPlayer : MonoBehaviour
     private static float ReadHorizontalInput()
     {
         Keyboard keyboard = Keyboard.current;
+        if (keyboard == null) return 0f;
 
-        return keyboard == null ? 0f :
-            (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed ? 1f : 0f) -
-            (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed ? 1f : 0f);
+        bool right = keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed;
+        bool left = keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed;
+
+        return (right ? 1f : 0f) - (left ? 1f : 0f);
     }
 
     public void Stop()

@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using TMPro;
 using UnityEngine;
@@ -30,6 +29,7 @@ public class DemoFlow : MonoBehaviour
 
     private Tween outcomeTween;
     private bool finished;
+    private bool statusFailed;
 
     public bool Won { get; private set; }
     public bool Finished => finished;
@@ -45,6 +45,13 @@ public class DemoFlow : MonoBehaviour
     private void Update()
     {
         HandleSceneInput();
+
+        if (settings == null)
+        {
+            Debug.LogError($"Не обновлена сцена '{name}': не заданы settings", this);
+            enabled = false;
+            return;
+        }
 
         if (!finished && player != null && player.transform.position.y < settings.FallHeight)
             Finish(false);
@@ -69,7 +76,13 @@ public class DemoFlow : MonoBehaviour
     public void SetStatus(string text)
     {
         if (status == null)
-            throw new InvalidOperationException("DemoFlow status reference is unassigned on " + name);
+        {
+            if (!statusFailed) Debug.LogError($"Не обновлен статус '{name}': не задан status", this);
+            statusFailed = true;
+            enabled = false;
+            return;
+        }
+        statusFailed = false;
         status.text = text;
     }
 
@@ -80,7 +93,11 @@ public class DemoFlow : MonoBehaviour
 
         if (settings == null || outcome == null || float.IsNaN(settings.OutcomeDuration) ||
             float.IsInfinity(settings.OutcomeDuration) || settings.OutcomeDuration <= 0f)
-            throw new InvalidOperationException("DemoFlow requires outcome and settings with positive finite OutcomeDuration on " + name);
+        {
+            Debug.LogError($"Не показан результат '{name}': outcome={outcome}, settings={settings}, нужен OutcomeDuration > 0", this);
+            enabled = false;
+            return;
+        }
 
         finished = true;
         Won = won;
@@ -127,8 +144,13 @@ public class DemoFlow : MonoBehaviour
 
     public void SwitchScene(int index)
     {
-        if (index >= 0 && index < sceneNames.Length)
-            LoadScene(ResolveScenePath(SceneManager.GetActiveScene().path, sceneNames[index]));
+        if (sceneNames == null || index < 0 || index >= sceneNames.Length)
+        {
+            Debug.LogError($"Не переключена сцена '{name}': index={index}, sceneNames={sceneNames?.Length ?? 0}", this);
+            return;
+        }
+
+        LoadScene(ResolveScenePath(SceneManager.GetActiveScene().path, sceneNames[index]));
     }
 
     private static string ResolveScenePath(string currentPath, string sceneName)

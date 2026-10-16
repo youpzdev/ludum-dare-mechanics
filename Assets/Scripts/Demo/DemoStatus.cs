@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public class DemoStatus : MonoBehaviour
@@ -37,7 +36,12 @@ public class DemoStatus : MonoBehaviour
     private void Update()
     {
         if (flow == null)
-            throw new InvalidOperationException("DemoStatus flow reference is unassigned on " + name);
+        {
+            Debug.LogError($"Не обновлен HUD '{name}': не задан flow", this);
+            enabled = false;
+            return;
+        }
+        if (!flow.enabled) return;
 
         bool animate = presentation != null && presentation.isActiveAndEnabled;
         int mechanic;
@@ -64,11 +68,14 @@ public class DemoStatus : MonoBehaviour
         {
             mechanic = 2;
             if (battery.Settings == null || puzzle == null)
-                throw new InvalidOperationException("DemoStatus battery requires settings and puzzle on " + name);
+            {
+                Debug.LogError($"Не обновлен HUD '{name}': settings={battery.Settings}, puzzle={puzzle}", this);
+                enabled = false;
+                return;
+            }
             primaryTarget = battery.Charge;
             secondaryTarget = puzzle.HoldProgress;
-            state = puzzle.IsComplete ? 4 : battery.IsDocked ? 3 : battery.LocalMultiplier > 1f ? 2 :
-                battery.LocalMultiplier < 1f ? 1 : 0;
+            state = GetTimeState();
             Smooth(primaryTarget, secondaryTarget, animate);
             capacity = battery.Settings.Capacity;
             multiplier = battery.LocalMultiplier;
@@ -89,7 +96,11 @@ public class DemoStatus : MonoBehaviour
             if (animate)
             {
                 if (grappleSettings == null || !grappleSettings.IsValid)
-                    throw new InvalidOperationException("DemoStatus grapple presentation requires valid grappleSettings on " + name);
+                {
+                    Debug.LogError($"Не обновлен HUD '{name}': неверные grappleSettings={grappleSettings}", this);
+                    enabled = false;
+                    return;
+                }
                 range = grappleSettings.Range;
                 presentation.Present(attached ? Mathf.Clamp01(primary / grappleSettings.Range) : 0f, 0f,
                     hasState && state != previousState);
@@ -138,6 +149,16 @@ public class DemoStatus : MonoBehaviour
     {
         primary = animate && hasState ? presentation.Smooth(primary, primaryTarget) : primaryTarget;
         secondary = animate && hasState ? presentation.Smooth(secondary, secondaryTarget) : secondaryTarget;
+    }
+
+    private int GetTimeState()
+    {
+        if (puzzle.IsComplete) return 4;
+        if (battery.IsDocked) return 3;
+        if (battery.LocalMultiplier > 1f) return 2;
+        if (battery.LocalMultiplier < 1f) return 1;
+
+        return 0;
     }
 
     private void OnDisable()
