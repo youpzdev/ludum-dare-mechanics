@@ -56,11 +56,16 @@ public class DemoPlayerVisuals : MonoBehaviour
 
     private void Start()
     {
-        Initialize();
+        if (!Initialize()) enabled = false;
     }
 
     private void OnEnable()
     {
+        if (!Initialize())
+        {
+            enabled = false;
+            return;
+        }
         focused = Application.isFocused;
         hasState = false;
     }
@@ -83,9 +88,9 @@ public class DemoPlayerVisuals : MonoBehaviour
                 if (speed >= minimumImpactSpeed)
                 {
                     float strength = Mathf.Clamp01(speed / fullImpactSpeed);
+                    if (!EmitLanding(strength)) return;
                     SetImpact(-landingSquash * strength);
                     if (cameraShake != null && landingShake > 0f) cameraShake.Impulse(strength * landingShake);
-                    EmitLanding(strength);
                     Landed?.Invoke(strength);
                 }
                 fallingSpeed = 0f;
@@ -161,13 +166,28 @@ public class DemoPlayerVisuals : MonoBehaviour
 
     private bool CanAnimate()
     {
-        return initialized && focused && !paused && !flow.Finished && player.isActiveAndEnabled &&
+        if (!initialized || !isActiveAndEnabled) return false;
+        if (player == null || flow == null || body == null || visual == null || speedTrail == null)
+        {
+            Debug.LogError($"Визуал игрока: player={player}, flow={flow}, body={body}, visual={visual}, trail={speedTrail}", this);
+            enabled = false;
+            return false;
+        }
+
+        return focused && !paused && !flow.Finished && player.isActiveAndEnabled &&
             body.simulated && player.gameObject.activeInHierarchy;
     }
 
-    private void EmitLanding(float strength)
+    private bool EmitLanding(float strength)
     {
-        if (landingBurst == null) return;
+        if (landingBurst == null) return true;
+        if (contactCollider == null)
+        {
+            Debug.LogError("Приземление: потерян contactCollider", this);
+            Clear();
+            enabled = false;
+            return false;
+        }
         Bounds bounds = contactCollider.bounds;
         Vector3 point = new Vector3(bounds.center.x, bounds.min.y, player.transform.position.z);
         int count = contactCollider.GetContacts(contacts);
@@ -183,6 +203,8 @@ public class DemoPlayerVisuals : MonoBehaviour
         }
         landingBurst.transform.position = point;
         landingBurst.Emit(Mathf.Clamp(Mathf.CeilToInt(landingParticleCount * strength), 1, 24));
+
+        return true;
     }
 
     private void SetImpact(float value)
@@ -213,55 +235,98 @@ public class DemoPlayerVisuals : MonoBehaviour
         if (landingBurst != null) landingBurst.Stop(false, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
-        if (initialized) return;
+        if (initialized) return true;
         if (player == null || player.Body == null || flow == null || visual == null || speedTrail == null)
         {
-            throw new InvalidOperationException($"DemoPlayerVisuals '{name}' requires player with Body, flow, visual and speedTrail: player={player}, flow={flow}, visual={visual}, speedTrail={speedTrail}.");
+            Debug.LogError($"Визуал игрока: player={player}, body={(player != null ? player.Body : null)}, flow={flow}, visual={visual}, trail={speedTrail}", this);
+            return false;
         }
-        if (visual == player.transform || !visual.IsChildOf(player.transform) ||
-            visual.GetComponentInChildren<Collider2D>(true) != null ||
-            visual.GetComponentInChildren<Rigidbody2D>(true) != null ||
-            visual.GetComponentInChildren<Collider>(true) != null ||
-            visual.GetComponentInChildren<Rigidbody>(true) != null ||
-            speedTrail.transform == player.transform || !speedTrail.transform.IsChildOf(player.transform) ||
-            speedTrail.transform.IsChildOf(visual) || visual.IsChildOf(speedTrail.transform) || speedTrail.autodestruct)
-        {
-            throw new InvalidOperationException($"DemoPlayerVisuals '{name}' requires a physics-free visual child and independent trail child with autodestruct=false: player='{player.name}', visual='{visual.name}', speedTrail='{speedTrail.name}', autodestruct={speedTrail.autodestruct}.");
-        }
-        if (!PositiveFinite(fullEffectSpeed) || !PositiveFinite(response) ||
-            !PositiveFinite(minimumImpactSpeed) || !PositiveFinite(fullImpactSpeed) ||
-            fullImpactSpeed < minimumImpactSpeed || !PositiveFinite(impactDuration) ||
-            !InRange(airStretch, 0f, 0.4f) || !InRange(maximumLean, 0f, 25f) ||
-            !InRange(landingSquash, 0f, 0.4f) || !InRange(jumpStretch, 0f, 0.4f) ||
-            !InRange(landingShake, 0f, 1f) || !PositiveFinite(trailStartSpeed) ||
-            !InRange(trailStopSpeed, 0f, trailStartSpeed) || trailStopSpeed >= trailStartSpeed)
-        {
-            throw new InvalidOperationException($"DemoPlayerVisuals '{name}' has invalid settings: fullEffectSpeed={fullEffectSpeed}, response={response}, minimumImpactSpeed={minimumImpactSpeed}, fullImpactSpeed={fullImpactSpeed}, impactDuration={impactDuration}, airStretch={airStretch}, maximumLean={maximumLean}, landingSquash={landingSquash}, jumpStretch={jumpStretch}, landingShake={landingShake}, trailStartSpeed={trailStartSpeed}, trailStopSpeed={trailStopSpeed}.");
-        }
-        if (landingBurst != null)
-        {
-            ParticleSystem.MainModule main = landingBurst.main;
-            if (contactCollider == null || contactCollider.attachedRigidbody != player.Body ||
-                landingParticleCount < 1 || landingParticleCount > 24 ||
-                main.loop || main.playOnAwake || main.simulationSpace != ParticleSystemSimulationSpace.World ||
-                main.stopAction != ParticleSystemStopAction.None || landingBurst.emission.enabled ||
-                landingBurst.subEmitters.enabled || landingBurst.transform.childCount != 0 ||
-                landingBurst.transform == player.transform || !landingBurst.transform.IsChildOf(player.transform) ||
-                landingBurst.transform.IsChildOf(visual) || visual.IsChildOf(landingBurst.transform) ||
-                landingBurst.transform.IsChildOf(speedTrail.transform) || speedTrail.transform.IsChildOf(landingBurst.transform) ||
-                landingBurst.GetComponent<Collider2D>() != null || landingBurst.GetComponent<Rigidbody2D>() != null ||
-                landingBurst.GetComponent<Collider>() != null || landingBurst.GetComponent<Rigidbody>() != null)
-            {
-                throw new InvalidOperationException($"DemoPlayerVisuals '{name}' landingBurst requires an independent physics-free child, player's contactCollider and authored manual world-space emission: contactCollider={contactCollider}, landingParticleCount={landingParticleCount}, loop={main.loop}, playOnAwake={main.playOnAwake}, simulationSpace={main.simulationSpace}, stopAction={main.stopAction}, emission={landingBurst.emission.enabled}, subEmitters={landingBurst.subEmitters.enabled}, children={landingBurst.transform.childCount}.");
-            }
-        }
+        if (!ValidateVisuals() || !ValidateMotion() || !ValidateLanding()) return false;
         body = player.Body;
         originalScale = visual.localScale;
         originalRotation = visual.localRotation;
         initialized = true;
         Clear();
+
+        return true;
+    }
+
+    private bool ValidateVisuals()
+    {
+        bool visualIsChild = visual != player.transform && visual.IsChildOf(player.transform);
+        bool trailIsChild = speedTrail.transform != player.transform && speedTrail.transform.IsChildOf(player.transform);
+        bool overlap = speedTrail.transform.IsChildOf(visual) || visual.IsChildOf(speedTrail.transform);
+        if (!visualIsChild || HasPhysics(visual) || !trailIsChild || overlap || speedTrail.autodestruct)
+        {
+            Debug.LogError($"Визуал игрока: visual={visual.name}, trail={speedTrail.name}, overlap={overlap}, autodestruct={speedTrail.autodestruct}; нужны отдельные дочерние визуалы", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool ValidateMotion()
+    {
+        if (!PositiveFinite(fullEffectSpeed) || !PositiveFinite(response) ||
+            !PositiveFinite(minimumImpactSpeed) || !PositiveFinite(fullImpactSpeed) ||
+            fullImpactSpeed < minimumImpactSpeed || !PositiveFinite(impactDuration))
+        {
+            Debug.LogError($"Движение визуала: fullSpeed={fullEffectSpeed}, response={response}, impactSpeed={minimumImpactSpeed}/{fullImpactSpeed}, duration={impactDuration}", this);
+            return false;
+        }
+        if (!InRange(airStretch, 0f, 0.4f) || !InRange(maximumLean, 0f, 25f) ||
+            !InRange(landingSquash, 0f, 0.4f) || !InRange(jumpStretch, 0f, 0.4f) ||
+            !InRange(landingShake, 0f, 1f))
+        {
+            Debug.LogError($"Деформация игрока: air={airStretch}, lean={maximumLean}, squash={landingSquash}, jump={jumpStretch}, shake={landingShake}", this);
+            return false;
+        }
+        if (!PositiveFinite(trailStartSpeed) || !InRange(trailStopSpeed, 0f, trailStartSpeed) || trailStopSpeed >= trailStartSpeed)
+        {
+            Debug.LogError($"Шлейф: startSpeed={trailStartSpeed}, stopSpeed={trailStopSpeed}", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool ValidateLanding()
+    {
+        if (landingBurst == null) return true;
+        if (contactCollider == null || contactCollider.attachedRigidbody != player.Body ||
+            landingParticleCount < 1 || landingParticleCount > 24)
+        {
+            Debug.LogError($"Приземление: contactCollider={contactCollider}, count={landingParticleCount}; нужен коллайдер игрока", this);
+            return false;
+        }
+        ParticleSystem.MainModule main = landingBurst.main;
+        if (main.loop || main.playOnAwake || main.simulationSpace != ParticleSystemSimulationSpace.World ||
+            main.stopAction != ParticleSystemStopAction.None || landingBurst.emission.enabled || landingBurst.subEmitters.enabled)
+        {
+            Debug.LogError($"Приземление: loop={main.loop}, awake={main.playOnAwake}, space={main.simulationSpace}, stop={main.stopAction}, emission={landingBurst.emission.enabled}, subEmitters={landingBurst.subEmitters.enabled}", this);
+            return false;
+        }
+        Transform burst = landingBurst.transform;
+        bool overlaps = burst.IsChildOf(visual) || visual.IsChildOf(burst) ||
+            burst.IsChildOf(speedTrail.transform) || speedTrail.transform.IsChildOf(burst);
+        if (burst.childCount != 0 || burst == player.transform || !burst.IsChildOf(player.transform) ||
+            overlaps || HasPhysics(burst))
+        {
+            Debug.LogError($"Приземление: burst={burst.name}, children={burst.childCount}, overlap={overlaps}; нужен отдельный дочерний визуал", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasPhysics(Transform target)
+    {
+        return target.GetComponentInChildren<Collider2D>(true) != null ||
+            target.GetComponentInChildren<Rigidbody2D>(true) != null ||
+            target.GetComponentInChildren<Collider>(true) != null ||
+            target.GetComponentInChildren<Rigidbody>(true) != null;
     }
 
     private static bool PositiveFinite(float value) { return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f; }
