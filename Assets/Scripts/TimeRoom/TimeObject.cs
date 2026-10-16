@@ -1,8 +1,10 @@
-using System;
 using UnityEngine;
 
 public class TimeObject : MonoBehaviour
 {
+    private bool failed;
+    private bool disabledByFailure;
+
     [Header("Local time")]
     [SerializeField] private TimeRoomSettings settings;
     [Tooltip("Overlapping zones use the highest priority; ties keep the first zone.")]
@@ -31,7 +33,7 @@ public class TimeObject : MonoBehaviour
     public bool IsCharging { get; private set; }
     public bool IsDocked { get; private set; }
     public uint DockInterruptionRevision { get; private set; }
-    public bool CanDock => Vector2.Distance(transform.position, dock.position) <= settings.DockRadius;
+    public bool CanDock => !failed && settings != null && dock != null && Vector2.Distance(transform.position, dock.position) <= settings.DockRadius;
     public TimeRoomSettings Settings => settings;
     public Transform Dock => dock;
     public Transform ChargeStation => chargeStation;
@@ -39,18 +41,19 @@ public class TimeObject : MonoBehaviour
     public void Configure(TimeRoomSettings balance, TimeZone[] regions, Transform station,
         Transform socket, Transform rotor)
     {
+        failed = false;
         settings = balance;
         zones = regions;
         chargeStation = station;
         dock = socket;
         rotatingPart = rotor;
-        Initialize();
+        if (!Initialize()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
     private void Start()
     {
-        if (!initialized)
-            Initialize();
+        if (!initialized && !Initialize()) return;
     }
 
     private void Update()
@@ -60,8 +63,16 @@ public class TimeObject : MonoBehaviour
 
     public void Tick(float seconds)
     {
-        if (!initialized)
-            Initialize();
+        if (failed) return;
+        if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds < 0)
+        {
+            Debug.LogError($"Аккумулятор {name}: seconds={seconds}, нужно неотрицательное конечное время", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return;
+        }
+        if (!initialized && !Initialize()) return;
         RefreshLocation();
         PreviousCharge = charge;
         charge = TimeCharge.Advance(charge, seconds, LocalMultiplier, IsCharging,
@@ -72,6 +83,8 @@ public class TimeObject : MonoBehaviour
 
     public void MoveTo(Vector2 position)
     {
+        if (failed) return;
+        if (!initialized && !Initialize()) return;
         BreakDock();
         transform.position = new Vector3(position.x, position.y, transform.position.z);
         RefreshLocation();
@@ -79,8 +92,9 @@ public class TimeObject : MonoBehaviour
 
     public bool TryDock()
     {
-        if (!CanDock)
-            return false;
+        if (failed) return false;
+        if (!initialized && !Initialize()) return false;
+        if (!CanDock) return false;
         transform.position = new Vector3(dock.position.x, dock.position.y, transform.position.z);
         IsDocked = true;
         RefreshLocation();
@@ -90,14 +104,16 @@ public class TimeObject : MonoBehaviour
 
     public void Undock()
     {
+        if (failed) return;
+        if (!initialized && !Initialize()) return;
         BreakDock();
         RefreshLocation();
     }
 
     public void ResetObject()
     {
-        if (!initialized)
-            Initialize();
+        if (failed) return;
+        if (!initialized && !Initialize()) return;
         transform.SetPositionAndRotation(initialPosition, initialRotation);
         rotatingPart.localRotation = initialPartRotation;
         charge = settings.InitialCharge;
@@ -116,21 +132,43 @@ public class TimeObject : MonoBehaviour
         }
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
+        if (failed) return false;
+        initialized = false;
         if (settings == null || zones == null || chargeStation == null || dock == null || rotatingPart == null)
-            throw new InvalidOperationException($"Time object '{name}' needs settings, zones, chargeStation, dock and rotatingPart.");
-        settings.Validate();
+        {
+            Debug.LogError($"Аккумулятор {name}: нужны settings, zones, chargeStation, dock, rotatingPart", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
+        if (!settings.Validate())
+        {
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
         for (int i = 0; i < zones.Length; i++)
         {
             if (zones[i] == null)
-                throw new InvalidOperationException($"Time object '{name}' has null zones[{i}].");
+            {
+                Debug.LogError($"Аккумулятор {name}: zones[{i}]=null", this);
+                disabledByFailure |= enabled;
+                failed = true;
+                enabled = false;
+                return false;
+            }
         }
         initialPosition = transform.position;
         initialRotation = transform.rotation;
         initialPartRotation = rotatingPart.localRotation;
         initialized = true;
         ResetObject();
+
+        return true;
     }
 
     private void RefreshLocation()
@@ -140,8 +178,7 @@ public class TimeObject : MonoBehaviour
         bool found = false;
         foreach (TimeZone zone in zones)
         {
-            if (!zone.Contains(transform.position) || (found && zone.Priority <= bestPriority))
-                continue;
+            if (!zone.Contains(transform.position) || (found && zone.Priority <= bestPriority)) continue;
             LocalMultiplier = zone.Multiplier;
             bestPriority = zone.Priority;
             found = true;

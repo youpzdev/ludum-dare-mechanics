@@ -1,10 +1,12 @@
-using System;
 using DG.Tweening;
 using UnityEngine;
 
 [DefaultExecutionOrder(100)]
 public class TimeRoomFeedback : MonoBehaviour
 {
+    private bool failed;
+    private bool disabledByFailure;
+
     private const int ChargeFillIndex = 0;
     private const int HoldFillIndex = 1;
     private const int DoorVisualIndex = 4;
@@ -36,6 +38,7 @@ public class TimeRoomFeedback : MonoBehaviour
         SpriteRenderer chargeRenderer, SpriteRenderer holdRenderer, SpriteRenderer modeRenderer,
         SpriteRenderer socketRenderer, SpriteRenderer doorRenderer)
     {
+        failed = false;
         RestoreVisuals();
         initialized = false;
         battery = item;
@@ -46,14 +49,14 @@ public class TimeRoomFeedback : MonoBehaviour
         modeVisual = modeRenderer;
         socketVisual = socketRenderer;
         doorVisual = doorRenderer;
-        Initialize();
+        if (!Initialize()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
         RefreshVisuals(false);
     }
 
     public void ResetFeedback()
     {
-        if (!initialized)
-            Initialize();
+        if (!initialized && !Initialize()) return;
 
         RestoreVisuals();
         RefreshVisuals(false);
@@ -61,16 +64,14 @@ public class TimeRoomFeedback : MonoBehaviour
 
     private void Start()
     {
-        if (!initialized)
-            Initialize();
+        if (!initialized && !Initialize()) return;
 
         RefreshVisuals(false);
     }
 
     private void OnEnable()
     {
-        if (initialized)
-            RefreshVisuals(false);
+        if (initialized) RefreshVisuals(false);
     }
 
     private void LateUpdate()
@@ -80,6 +81,8 @@ public class TimeRoomFeedback : MonoBehaviour
 
     private void RefreshVisuals(bool animate)
     {
+        if (failed) return;
+        if (!initialized && !Initialize()) return;
         TimeRoomSettings settings = battery.Settings;
         Vector3 chargeScale = originalScales[ChargeFillIndex];
         chargeScale.x *= Mathf.Clamp01(battery.Charge / settings.Capacity);
@@ -126,31 +129,38 @@ public class TimeRoomFeedback : MonoBehaviour
             target.color = color;
     }
 
-    private void Initialize()
+    private bool Initialize()
     {
+        if (failed) return false;
         if (battery == null || puzzle == null || carry == null || battery.Settings == null)
-            throw new InvalidOperationException("TimeRoomFeedback requires battery with settings, puzzle and carry on " + name);
+            return Invalid($"Отклик времени {name}: нужны battery с settings, puzzle и carry");
 
-        battery.Settings.Validate();
+        if (!battery.Settings.Validate())
+        {
+            RestoreVisuals();
+            initialized = false;
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
         float duration = battery.Settings.FeedbackDuration;
         if (float.IsNaN(duration) || float.IsInfinity(duration) || duration <= 0)
-            throw new InvalidOperationException("TimeRoomFeedback duration must be finite and positive, received " + duration + " on " + name);
+            return Invalid($"Отклик времени {name}: feedbackDuration={duration}, нужно положительное конечное время");
 
         visuals = new[] { chargeFill, holdFill, modeVisual, socketVisual, doorVisual };
         for (int i = 0; i < visuals.Length; i++)
         {
             SpriteRenderer visual = visuals[i];
-            if (visual == null)
-                throw new InvalidOperationException("TimeRoomFeedback renderer index=" + i + " is unassigned on " + name);
-
+            if (visual == null) return Invalid($"Отклик времени {name}: visuals[{i}]=null");
             if (visual.GetComponentInChildren<Collider2D>(true) != null ||
                 visual.transform == battery.transform || visual.transform == transform)
-                throw new InvalidOperationException("TimeRoomFeedback renderer index=" + i + " must be a separate visual transform without colliders on " + name);
+                return Invalid($"Отклик времени {name}: visuals[{i}] нужен отдельный transform без коллайдеров");
 
             for (int j = 0; j < i; j++)
             {
                 if (visual.transform.IsChildOf(visuals[j].transform) || visuals[j].transform.IsChildOf(visual.transform))
-                    throw new InvalidOperationException("TimeRoomFeedback renderers index=" + i + " and index=" + j + " must use independent transforms on " + name);
+                    return Invalid($"Отклик времени {name}: visuals[{i}] и visuals[{j}] вложены друг в друга");
             }
         }
 
@@ -166,6 +176,21 @@ public class TimeRoomFeedback : MonoBehaviour
 
         initialized = true;
         hasState = false;
+
+        return true;
+    }
+
+    private bool Invalid(string message)
+    {
+        if (failed) return false;
+        Debug.LogError(message, this);
+        RestoreVisuals();
+        initialized = false;
+        disabledByFailure |= enabled;
+        failed = true;
+        enabled = false;
+
+        return false;
     }
 
     private void RestoreVisuals()
@@ -207,7 +232,6 @@ public class TimeRoomFeedback : MonoBehaviour
 
     private void OnApplicationFocus(bool focused)
     {
-        if (!focused && initialized)
-            ResetFeedback();
+        if (!focused && initialized) ResetFeedback();
     }
 }

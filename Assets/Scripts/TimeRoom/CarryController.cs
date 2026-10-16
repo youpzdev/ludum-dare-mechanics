@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
@@ -6,6 +5,9 @@ using UnityEngine.EventSystems;
 [DefaultExecutionOrder(-100)]
 public class CarryController : MonoBehaviour
 {
+    private bool failed;
+    private bool disabledByFailure;
+
     [Header("Input")]
     [SerializeField] private Camera sceneCamera;
 
@@ -25,20 +27,23 @@ public class CarryController : MonoBehaviour
 
     public void Configure(Camera camera, TimeObject item, Collider2D itemCollider, BoxCollider2D bounds)
     {
+        failed = false;
         sceneCamera = camera;
         battery = item;
         batteryCollider = itemCollider;
         roomBounds = bounds;
-        Validate();
+        if (!Validate()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
     private void Start()
     {
-        Validate();
+        if (!Validate()) return;
     }
 
     private void Update()
     {
+        if (!Validate()) return;
         Mouse mouse = Mouse.current;
         if (mouse == null || (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()))
         {
@@ -64,12 +69,12 @@ public class CarryController : MonoBehaviour
             MoveTo(pointer + dragOffset);
             Release();
         }
-        if (IsDragging)
-            MoveTo(pointer + dragOffset);
+        if (IsDragging) MoveTo(pointer + dragOffset);
     }
 
     public void MoveTo(Vector2 position)
     {
+        if (!Validate()) return;
         Bounds bounds = roomBounds.bounds;
         battery.MoveTo(new Vector2(
             Mathf.Clamp(position.x, bounds.min.x + halfSize.x, bounds.max.x - halfSize.x),
@@ -78,8 +83,8 @@ public class CarryController : MonoBehaviour
 
     public void Release()
     {
-        if (!IsDragging)
-            return;
+        if (!IsDragging) return;
+        if (!Validate()) return;
         IsDragging = false;
         battery.TryDock();
     }
@@ -93,20 +98,34 @@ public class CarryController : MonoBehaviour
 
     private void OnApplicationFocus(bool focused)
     {
-        if (!focused)
-            CancelDrag();
+        if (!focused) CancelDrag();
     }
 
-    private void Validate()
+    private bool Validate()
     {
+        if (failed) return false;
         if (sceneCamera == null || battery == null || batteryCollider == null || roomBounds == null)
-            throw new InvalidOperationException($"Carry controller '{name}' needs camera, battery, batteryCollider and roomBounds.");
+            return Invalid($"Перенос {name}: нужны sceneCamera, battery, batteryCollider, roomBounds");
         if (batteryCollider.transform != battery.transform)
-            throw new InvalidOperationException($"Battery collider '{batteryCollider.name}' must be on battery '{battery.name}', not its rotating part.");
+            return Invalid($"Перенос {name}: batteryCollider={batteryCollider.name} должен быть на battery={battery.name}");
         if (Mathf.Abs(Mathf.DeltaAngle(roomBounds.transform.eulerAngles.z, 0)) > 0.01f)
-            throw new InvalidOperationException($"Room bounds '{roomBounds.name}' must be axis aligned, angle={roomBounds.transform.eulerAngles.z}.");
+            return Invalid($"Перенос {name}: roomBounds={roomBounds.name}, угол={roomBounds.transform.eulerAngles.z}, нужен 0");
         halfSize = batteryCollider.bounds.extents;
         if (roomBounds.bounds.size.x <= halfSize.x * 2 || roomBounds.bounds.size.y <= halfSize.y * 2)
-            throw new InvalidOperationException($"Room bounds '{roomBounds.name}' size={roomBounds.bounds.size} cannot contain battery size={batteryCollider.bounds.size}.");
+            return Invalid($"Перенос {name}: roomBounds={roomBounds.bounds.size} меньше battery={batteryCollider.bounds.size}");
+
+        return true;
+    }
+
+    private bool Invalid(string message)
+    {
+        if (failed) return false;
+        Debug.LogError(message, this);
+        CancelDrag();
+        disabledByFailure |= enabled;
+        failed = true;
+        enabled = false;
+
+        return false;
     }
 }

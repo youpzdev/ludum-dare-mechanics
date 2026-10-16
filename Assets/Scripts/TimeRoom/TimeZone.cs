@@ -1,8 +1,10 @@
-using System;
 using UnityEngine;
 
 public class TimeZone : MonoBehaviour
 {
+    private bool failed;
+    private bool disabledByFailure;
+
     [Header("Region")]
     [SerializeField] private TimeRoomSettings settings;
     [SerializeField] private Collider2D area;
@@ -17,24 +19,41 @@ public class TimeZone : MonoBehaviour
 
     public void Configure(TimeRoomSettings balance, Collider2D region, bool accelerated, int order)
     {
+        failed = false;
         settings = balance;
         area = region;
         fast = accelerated;
         priority = order;
-        Validate();
+        if (!Validate()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
-    public bool Contains(Vector2 position) { return isActiveAndEnabled && area.enabled && area.OverlapPoint(position); }
+    public bool Contains(Vector2 position) { return !failed && isActiveAndEnabled && area != null && area.enabled && area.OverlapPoint(position); }
 
     private void Start()
     {
-        Validate();
+        if (!Validate()) return;
     }
 
-    private void Validate()
+    private bool Validate()
     {
+        if (failed) return false;
         if (settings == null || area == null)
-            throw new InvalidOperationException($"Time zone '{name}' needs settings and area collider.");
-        settings.Validate();
+        {
+            Debug.LogError($"Зона времени {name}: нужны settings и area", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
+        if (!settings.Validate())
+        {
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
+
+        return true;
     }
 }

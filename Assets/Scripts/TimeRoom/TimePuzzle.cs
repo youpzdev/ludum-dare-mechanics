@@ -1,8 +1,10 @@
-using System;
 using UnityEngine;
 
 public class TimePuzzle : MonoBehaviour
 {
+    private bool failed;
+    private bool disabledByFailure;
+
     [Header("Battery")]
     [SerializeField] private TimeRoomSettings settings;
     [SerializeField] private TimeObject battery;
@@ -25,18 +27,20 @@ public class TimePuzzle : MonoBehaviour
     public void Configure(TimeRoomSettings balance, TimeObject item, Transform station, Transform socket,
         Collider2D door, CarryController controller)
     {
+        failed = false;
         settings = balance;
         battery = item;
         chargeStation = station;
         dock = socket;
         exitDoor = door;
         carry = controller;
-        Validate();
+        if (!Validate()) return;
+        if (disabledByFailure) { disabledByFailure = false; enabled = true; }
     }
 
     private void Start()
     {
-        Validate();
+        if (!Validate()) return;
     }
 
     private void LateUpdate()
@@ -46,8 +50,16 @@ public class TimePuzzle : MonoBehaviour
 
     public void Tick(float seconds)
     {
-        if (IsComplete)
+        if (!Validate()) return;
+        if (float.IsNaN(seconds) || float.IsInfinity(seconds) || seconds < 0)
+        {
+            Debug.LogError($"Приемник {name}: seconds={seconds}, нужно неотрицательное конечное время", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
             return;
+        }
+        if (IsComplete) return;
         if (dockInterruptionRevision != battery.DockInterruptionRevision)
         {
             hold = 0;
@@ -65,6 +77,7 @@ public class TimePuzzle : MonoBehaviour
 
     public void ResetPuzzle()
     {
+        if (!Validate()) return;
         carry.CancelDrag();
         battery.ResetObject();
         dockInterruptionRevision = battery.DockInterruptionRevision;
@@ -73,12 +86,33 @@ public class TimePuzzle : MonoBehaviour
         exitDoor.enabled = true;
     }
 
-    private void Validate()
+    private bool Validate()
     {
+        if (failed) return false;
         if (settings == null || battery == null || chargeStation == null || dock == null || exitDoor == null || carry == null)
-            throw new InvalidOperationException($"Time puzzle '{name}' needs settings, battery, chargeStation, dock, exitDoor and carry.");
-        settings.Validate();
+        {
+            Debug.LogError($"Приемник {name}: нужны settings, battery, chargeStation, dock, exitDoor, carry", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
+        if (!settings.Validate())
+        {
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
         if (battery.Settings != settings || battery.Dock != dock || battery.ChargeStation != chargeStation)
-            throw new InvalidOperationException($"Time puzzle '{name}' and battery '{battery.name}' must share settings, chargeStation and dock.");
+        {
+            Debug.LogError($"Приемник {name}: у battery={battery.name} другие settings, chargeStation или dock", this);
+            disabledByFailure |= enabled;
+            failed = true;
+            enabled = false;
+            return false;
+        }
+
+        return true;
     }
 }

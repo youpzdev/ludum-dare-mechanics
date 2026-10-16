@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "Ludum Dare/Time Room Settings")]
@@ -62,20 +61,39 @@ public class TimeRoomSettings : ScriptableObject
     public float StationRadius => stationRadius;
     public float DockRadius => dockRadius;
 
-    public void Validate()
+    public bool Validate()
     {
-        float[] positive = { fastMultiplier, slowMultiplier, capacity, chargeSpeed, dischargeSpeed,
-            holdSeconds, stationRadius, dockRadius };
-        foreach (float value in positive)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0)
-                throw new InvalidOperationException($"Time room settings '{name}' contain invalid positive value {value}.");
-        }
+        if (!Positive(fastMultiplier, nameof(fastMultiplier)) || !Positive(slowMultiplier, nameof(slowMultiplier)) ||
+            !Positive(capacity, nameof(capacity)) || !Positive(chargeSpeed, nameof(chargeSpeed)) ||
+            !Positive(dischargeSpeed, nameof(dischargeSpeed)) || !Positive(holdSeconds, nameof(holdSeconds)) ||
+            !Positive(stationRadius, nameof(stationRadius)) || !Positive(dockRadius, nameof(dockRadius))) return false;
         if (float.IsNaN(initialCharge) || initialCharge < 0 || initialCharge > capacity)
-            throw new InvalidOperationException($"Initial charge {initialCharge} must be within 0..{capacity} in '{name}'.");
+        {
+            Debug.LogError($"Настройки времени {name}: initialCharge={initialCharge}, диапазон 0..{capacity}", this);
+            return false;
+        }
         if (float.IsNaN(chargeThreshold) || chargeThreshold < 0 || chargeThreshold >= capacity)
-            throw new InvalidOperationException($"Charge threshold {chargeThreshold} must be within 0..{capacity} in '{name}'.");
+        {
+            Debug.LogError($"Настройки времени {name}: chargeThreshold={chargeThreshold}, нужно 0..{capacity} без верхней границы", this);
+            return false;
+        }
         if (float.IsNaN(rotationSpeed) || float.IsInfinity(rotationSpeed))
-            throw new InvalidOperationException($"Rotation speed {rotationSpeed} must be finite in '{name}'.");
+        {
+            Debug.LogError($"Настройки времени {name}: rotationSpeed={rotationSpeed}, нужно конечное значение", this);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool Positive(float value, string field)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0)
+        {
+            Debug.LogError($"Настройки времени {name}: {field}={value}, нужно положительное конечное значение", this);
+            return false;
+        }
+
+        return true;
     }
 }
