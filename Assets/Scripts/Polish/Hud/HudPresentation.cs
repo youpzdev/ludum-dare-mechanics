@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using TMPro;
 using UnityEngine;
@@ -19,6 +18,7 @@ public class HudPresentation : MonoBehaviour
 
     public float Smooth(float current, float target)
     {
+        if (!isActiveAndEnabled || !Initialize()) return current;
         float next = Mathf.Lerp(current, target, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 5f / smoothingDuration));
 
         return Mathf.Abs(next - target) < 0.001f ? target : next;
@@ -26,7 +26,13 @@ public class HudPresentation : MonoBehaviour
 
     public void Present(float primary, float secondary, bool stateChanged)
     {
-        if (!initialized) Initialize();
+        if (!isActiveAndEnabled || !Initialize()) return;
+        if (status == null)
+        {
+            Debug.LogError("HUD: потерян status", this);
+            enabled = false;
+            return;
+        }
 
         if (primaryFill != null) primaryFill.fillAmount = Mathf.Clamp01(primary);
         if (secondaryFill != null) secondaryFill.fillAmount = Mathf.Clamp01(secondary);
@@ -40,25 +46,36 @@ public class HudPresentation : MonoBehaviour
 
     private void Awake()
     {
-        Initialize();
+        if (!Initialize()) enabled = false;
     }
 
-    private void Initialize()
+    private void OnEnable()
     {
+        if (!Initialize()) enabled = false;
+    }
+
+    private bool Initialize()
+    {
+        if (initialized) return true;
         if (status == null || !PositiveFinite(smoothingDuration) || !PositiveFinite(stateDuration) ||
             !PositiveFinite(stateScale) || stateScale < 1f || stateScale > 1.1f)
         {
-            throw new InvalidOperationException("HudPresentation requires status and finite timings/scale on " + name + "; smoothing=" + smoothingDuration + " stateDuration=" + stateDuration + " scale=" + stateScale);
+            Debug.LogError($"HUD: status={status}, smoothing={smoothingDuration}, duration={stateDuration}, scale={stateScale}", this);
+            return false;
         }
-        ValidateFill(primaryFill, nameof(primaryFill));
-        ValidateFill(secondaryFill, nameof(secondaryFill));
+        if (!ValidateFill(primaryFill, nameof(primaryFill)) || !ValidateFill(secondaryFill, nameof(secondaryFill))) return false;
         originalScale = status.rectTransform.localScale;
         initialized = true;
+
+        return true;
     }
 
-    private void ValidateFill(Image image, string field)
+    private bool ValidateFill(Image image, string field)
     {
-        if (image != null && image.type != Image.Type.Filled) throw new InvalidOperationException("HudPresentation " + field + " must use Image.Type.Filled on " + name);
+        if (image == null || image.type == Image.Type.Filled) return true;
+        Debug.LogError($"HUD: {field}.type={image.type}, нужен Filled", this);
+
+        return false;
     }
 
     private static bool PositiveFinite(float value) { return value > 0f && !float.IsNaN(value) && !float.IsInfinity(value); }

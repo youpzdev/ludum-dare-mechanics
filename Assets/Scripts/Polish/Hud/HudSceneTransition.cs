@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using UnityEngine;
 
@@ -13,7 +12,9 @@ public class HudSceneTransition : MonoBehaviour
     {
         if (overlay == null || float.IsNaN(duration) || float.IsInfinity(duration) || duration <= 0f)
         {
-            throw new InvalidOperationException("HudSceneTransition requires overlay and finite positive duration on " + name + "; duration=" + duration);
+            Debug.LogError($"Переход: overlay={overlay}, duration={duration}", this);
+            enabled = false;
+            return;
         }
 
         overlay.blocksRaycasts = false;

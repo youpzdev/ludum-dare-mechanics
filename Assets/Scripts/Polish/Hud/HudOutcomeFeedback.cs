@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using TMPro;
 using UnityEngine;
@@ -18,10 +17,17 @@ public class HudOutcomeFeedback : MonoBehaviour
 
     public void Play(bool won, float duration)
     {
-        if (!initialized) Initialize();
+        if (!isActiveAndEnabled || !Initialize()) return;
+        if (outcome == null)
+        {
+            Debug.LogError("Результат: потерян outcome", this);
+            enabled = false;
+            return;
+        }
         if (float.IsNaN(duration) || float.IsInfinity(duration) || duration <= 0f)
         {
-            throw new ArgumentOutOfRangeException(nameof(duration), duration, "HudOutcomeFeedback duration must be finite and positive on " + name);
+            Debug.LogError($"Результат: неверная duration={duration}", this);
+            return;
         }
 
         Clear();
@@ -42,29 +48,40 @@ public class HudOutcomeFeedback : MonoBehaviour
 
     private void Awake()
     {
-        Initialize();
+        if (!Initialize()) enabled = false;
     }
 
-    private void Initialize()
+    private void OnEnable()
     {
+        if (!Initialize()) enabled = false;
+    }
+
+    private bool Initialize()
+    {
+        if (initialized) return true;
         if (outcome == null || float.IsNaN(scaleFrom) || float.IsInfinity(scaleFrom) ||
             scaleFrom < 0.5f || scaleFrom > 1f || float.IsNaN(riseDistance) ||
             float.IsInfinity(riseDistance) || riseDistance < 0f)
         {
-            throw new InvalidOperationException("HudOutcomeFeedback requires outcome and finite scale/rise on " + name + "; scale=" + scaleFrom + " rise=" + riseDistance);
+            Debug.LogError($"Результат: outcome={outcome}, scale={scaleFrom}, rise={riseDistance}", this);
+            return false;
         }
         if (victoryAudio != null && (victoryAudio.clip == null || victoryAudio.loop || victoryAudio.playOnAwake))
         {
-            throw new InvalidOperationException("HudOutcomeFeedback victoryAudio requires a clip, loop=false and playOnAwake=false on " + name);
+            Debug.LogError($"Победный звук: clip={victoryAudio.clip}, loop={victoryAudio.loop}, playOnAwake={victoryAudio.playOnAwake}", this);
+            return false;
         }
         if (victoryParticles != null && (victoryParticles.main.loop || victoryParticles.main.playOnAwake))
         {
-            throw new InvalidOperationException("HudOutcomeFeedback victoryParticles requires loop=false and playOnAwake=false on " + name);
+            Debug.LogError($"Победные частицы: loop={victoryParticles.main.loop}, playOnAwake={victoryParticles.main.playOnAwake}", this);
+            return false;
         }
 
         originalScale = outcome.rectTransform.localScale;
         originalPosition = outcome.rectTransform.anchoredPosition;
         initialized = true;
+
+        return true;
     }
 
     public void Clear()

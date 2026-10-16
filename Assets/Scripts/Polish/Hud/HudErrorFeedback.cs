@@ -1,4 +1,3 @@
-using System;
 using DG.Tweening;
 using TMPro;
 using UnityEngine;
@@ -19,7 +18,9 @@ public class HudErrorFeedback : MonoBehaviour
         if (source == null || message == null || !PositiveFinite(hintDelay) ||
             !PositiveFinite(hintDuration) || !PositiveFinite(fadeDuration))
         {
-            throw new InvalidOperationException("HudErrorFeedback requires source, message and finite positive timings on " + name + "; hintDelay=" + hintDelay + " hintDuration=" + hintDuration + " fade=" + fadeDuration);
+            Debug.LogError($"Подсказки: source={source}, message={message}, delay={hintDelay}, duration={hintDuration}, fade={fadeDuration}", this);
+            enabled = false;
+            return;
         }
 
         Clear();
@@ -31,13 +32,23 @@ public class HudErrorFeedback : MonoBehaviour
 
     private void OnCue(MechanicCue cue, Vector3 position)
     {
+        if (!isActiveAndEnabled) return;
         if (cue == MechanicCue.InkRejected || cue == MechanicCue.HookRejected || cue == MechanicCue.BatteryRejected)
         {
+            if (source == null || message == null)
+            {
+                Debug.LogError($"Подсказки: потеряны source={source}, message={message}", this);
+                Clear();
+                enabled = false;
+                return;
+            }
             string error = source.ErrorText;
             string hint = source.HintText;
             if (string.IsNullOrWhiteSpace(error) || string.IsNullOrWhiteSpace(hint))
             {
-                throw new InvalidOperationException("HudErrorFeedback received " + cue + " without ErrorText/HintText on " + source.name + "; errorLength=" + (error == null ? -1 : error.Length) + " hintLength=" + (hint == null ? -1 : hint.Length));
+                Debug.LogError($"Подсказки: cue={cue}, пустые ErrorText/HintText у {source.name}", this);
+                Clear();
+                return;
             }
 
             Clear();
@@ -45,10 +56,10 @@ public class HudErrorFeedback : MonoBehaviour
             feedback = DOTween.Sequence()
                 .Append(message.DOFade(1f, fadeDuration).SetEase(Ease.OutCubic))
                 .AppendInterval(hintDelay)
-                .AppendCallback(() => message.text = error + "\n" + hint)
+                .AppendCallback(() => { if (message != null) message.text = error + "\n" + hint; })
                 .AppendInterval(hintDuration)
                 .Append(message.DOFade(0f, fadeDuration).SetEase(Ease.OutCubic))
-                .OnComplete(() => message.text = string.Empty)
+                .OnComplete(() => { if (message != null) message.text = string.Empty; })
                 .SetUpdate(true);
         }
         else if (cue == MechanicCue.BridgeCompleted || cue == MechanicCue.HookAttached ||
